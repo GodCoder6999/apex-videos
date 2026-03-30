@@ -1,6 +1,10 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-primeBg: #0f171e;
+  --color-primeHover: #1a242f;
+  --color-primeBlue: #00a8e1;
+}
 
 body {
   background-color: #0f171e;
@@ -8,6 +12,7 @@ body {
   overflow-x: hidden;
 }
 
+/* Hide scrollbar for the horizontal rows but keep functionality */
 .scrollbar-hide::-webkit-scrollbar {
     display: none;
 }
