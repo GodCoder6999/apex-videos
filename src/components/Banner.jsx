@@ -22,7 +22,6 @@ const Banner = ({ fetchUrl = `/trending/all/week?api_key=${API_KEY}&language=en-
   }, [fetchUrl]);
 
   if (!movie) return <div className="h-[75vh] md:h-[90vh] bg-primeBg animate-pulse"></div>;
-
   const type = movie.media_type || (movie.first_air_date ? 'tv' : 'movie');
 
   return (
@@ -35,57 +34,39 @@ const Banner = ({ fetchUrl = `/trending/all/week?api_key=${API_KEY}&language=en-
       
       <div className="absolute top-[30%] md:top-[35%] left-4 md:left-12 max-w-2xl w-full pr-4">
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-primeBlue font-black text-sm tracking-wider bg-primeBlue/10 px-1.5 py-0.5 rounded">apex</span>
-          <span className="text-gray-300 text-xs md:text-sm font-semibold tracking-wide">Included with Prime</span>
+          <span className="text-primeBlue font-black text-sm bg-primeBlue/10 px-1.5 py-0.5 rounded">apex</span>
+          <span className="text-gray-300 text-xs md:text-sm font-semibold">Included with Prime</span>
         </div>
 
-        <h1 className="text-4xl md:text-6xl font-extrabold mb-4 drop-shadow-2xl tracking-tight leading-tight">
+        <h1 className="text-4xl md:text-6xl font-extrabold mb-4 tracking-tight leading-tight">
           {movie.title || movie.name || movie.original_name}
         </h1>
 
         <div className="flex flex-wrap items-center gap-3 text-[13px] md:text-sm text-gray-400 font-semibold mb-6">
-          <span className="text-yellow-500 font-bold flex items-center gap-1">
-            IMDb <span className="text-white">{(movie.vote_average || 7.5).toFixed(1)}</span>
-          </span>
+          <span className="text-yellow-500 font-bold flex items-center gap-1">IMDb <span className="text-white">{(movie.vote_average || 7.5).toFixed(1)}</span></span>
           <span>{movie.release_date?.substring(0,4) || movie.first_air_date?.substring(0,4)}</span>
-          <span className="border border-gray-600 px-1.5 py-0.5 rounded-sm text-gray-300">U/A 16+</span>
-          <span className="bg-gray-800 px-1.5 py-0.5 rounded-sm text-gray-300">X-Ray</span>
-          <span className="bg-gray-800 px-1.5 py-0.5 rounded-sm text-gray-300">HDR</span>
+          <span className="border border-gray-600 px-1.5 py-0.5 rounded-sm">U/A 16+</span>
         </div>
 
-        <p className="text-gray-200 text-sm md:text-[17px] mb-8 line-clamp-3 md:line-clamp-4 drop-shadow-md leading-relaxed font-medium w-[90%] md:w-full">
+        <p className="text-gray-200 text-sm md:text-[17px] mb-8 line-clamp-3 md:line-clamp-4 leading-relaxed font-medium">
           {movie.overview}
         </p>
 
         <div className="flex items-center gap-3 md:gap-4">
-          <button 
-            onClick={() => navigate(`/detail/${type}/${movie.id}`, { state: { movie } })}
-            className="flex items-center justify-center gap-2 bg-white text-black px-6 md:px-8 py-3 rounded-md font-bold hover:bg-gray-200 transition-all duration-200 text-base md:text-lg hover:scale-105 active:scale-95"
-          >
+          <button onClick={() => navigate(`/play/${type}/${movie.id}`)} className="flex items-center justify-center gap-2 bg-white text-black px-6 md:px-8 py-3 rounded-md font-bold hover:bg-gray-200 transition-all text-base md:text-lg">
             <Play fill="currentColor" className="w-5 h-5 md:w-6 md:h-6" /> Play
           </button>
-          
-          <button 
-            onClick={() => setInWatchlist(!inWatchlist)}
-            className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-gray-800/60 flex items-center justify-center text-white hover:bg-white hover:text-black transition-all duration-200 backdrop-blur-md border border-gray-500 hover:border-transparent"
-          >
+          <button onClick={() => setInWatchlist(!inWatchlist)} className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-gray-800/60 flex items-center justify-center text-white hover:bg-white hover:text-black border border-gray-500 transition-all">
             {inWatchlist ? <Check strokeWidth={3} className="w-6 h-6" /> : <Plus strokeWidth={2.5} className="w-6 h-6" />}
           </button>
-          
-          <button 
-            onClick={() => navigate(`/detail/${type}/${movie.id}`, { state: { movie } })}
-            className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-gray-800/60 flex items-center justify-center text-white hover:bg-white hover:text-black transition-all duration-200 backdrop-blur-md border border-gray-500 hover:border-transparent"
-          >
+          <button onClick={() => navigate(`/detail/${type}/${movie.id}`, { state: { movie } })} className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-gray-800/60 flex items-center justify-center text-white hover:bg-white hover:text-black border border-gray-500 transition-all">
             <Info strokeWidth={2.5} className="w-6 h-6" />
           </button>
         </div>
       </div>
 
       <div className="absolute bottom-[20%] right-6 md:right-12 hidden md:block">
-        <button 
-          onClick={() => setIsMuted(!isMuted)}
-          className="w-12 h-12 rounded-full border border-gray-400 flex items-center justify-center text-white hover:bg-white/10 transition-colors backdrop-blur-sm"
-        >
+        <button onClick={() => setIsMuted(!isMuted)} className="w-12 h-12 rounded-full border border-gray-400 flex items-center justify-center text-white hover:bg-white/10 transition-colors backdrop-blur-sm">
           {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
         </button>
       </div>
