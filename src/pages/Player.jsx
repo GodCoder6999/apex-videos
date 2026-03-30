@@ -2,7 +2,6 @@ import React, {
   useEffect, useRef, useState, useCallback,
 } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import Hls from 'hls.js'
 import {
   ChevronLeft, Play, Pause, Volume2, VolumeX,
   Maximize, Minimize, Settings, Subtitles,
