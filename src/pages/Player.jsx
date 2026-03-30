@@ -1,249 +1,258 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, AlertCircle, Loader2 } from 'lucide-react';
+import { ChevronLeft, RefreshCw, Tv2 } from 'lucide-react';
 
-// ---------------------------------------------------------------------------
-// HLS source chain — tried in order until one loads successfully.
-// All return raw .m3u8 manifests that Video.js / VHS can parse natively,
-// giving you real multi-audio and subtitle tracks without any iframe.
-// ---------------------------------------------------------------------------
-const buildSources = (type, id) => [
-  // 1. vidsrc.dev raw HLS  (primary)
+// ─────────────────────────────────────────────────────────────
+// SOURCE REGISTRY — 8 providers, all accept TMDB IDs, all serve
+// their own full player inside the iframe (no CORS issues).
+// ─────────────────────────────────────────────────────────────
+const SOURCES = [
   {
-    src: `https://vidsrc.dev/embed/${type}/${id}`,
-    type: 'application/x-mpegURL',
-    label: 'vidsrc.dev',
+    id: 'vidsrc-cc',
+    label: 'VidSrc CC',
+    movie: (id) => `https://vidsrc.cc/v2/embed/movie/${id}`,
+    tv: (id, s, e) => `https://vidsrc.cc/v2/embed/tv/${id}/${s}/${e}`,
   },
-  // 2. vidsrc.to  (fallback 1)
   {
-    src: `https://vidsrc.to/embed/${type}/${id}`,
-    type: 'application/x-mpegURL',
-    label: 'vidsrc.to',
+    id: 'vidsrc-xyz',
+    label: 'VidSrc XYZ',
+    movie: (id) => `https://vidsrc.xyz/embed/movie?tmdb=${id}`,
+    tv: (id, s, e) => `https://vidsrc.xyz/embed/tv?tmdb=${id}&season=${s}&episode=${e}`,
   },
-  // 3. vidsrc.me  (fallback 2)
   {
-    src: `https://vidsrc.me/embed/${type}/${id}`,
-    type: 'application/x-mpegURL',
-    label: 'vidsrc.me',
+    id: 'autoembed',
+    label: 'AutoEmbed',
+    movie: (id) => `https://player.autoembed.cc/embed/movie/${id}`,
+    tv: (id, s, e) => `https://player.autoembed.cc/embed/tv/${id}/${s}/${e}`,
   },
-  // 4. multiembed.mov raw m3u8 (fallback 3 — sometimes exposes HLS directly)
   {
-    src: `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1&type=${type}`,
-    type: 'application/x-mpegURL',
-    label: 'multiembed',
+    id: 'embed-su',
+    label: 'Embed SU',
+    movie: (id) => `https://embed.su/embed/movie/${id}`,
+    tv: (id, s, e) => `https://embed.su/embed/tv/${id}/${s}/${e}`,
+  },
+  {
+    id: '2embed',
+    label: '2Embed',
+    movie: (id) => `https://www.2embed.cc/embed/${id}`,
+    tv: (id, s, e) => `https://www.2embed.cc/embedtv/${id}&s=${s}&e=${e}`,
+  },
+  {
+    id: 'multiembed',
+    label: 'MultiEmbed',
+    movie: (id) => `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1`,
+    tv: (id, s, e) =>
+      `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1&s=${s}&e=${e}`,
+  },
+  {
+    id: 'vidsrc-me',
+    label: 'VidSrc ME',
+    movie: (id) => `https://vidsrc.me/embed/movie?tmdb=${id}`,
+    tv: (id, s, e) => `https://vidsrc.me/embed/tv?tmdb=${id}&season=${s}&episode=${e}`,
+  },
+  {
+    id: 'smashy',
+    label: 'Smashy',
+    movie: (id) => `https://player.smashy.stream/movie/${id}`,
+    tv: (id, s, e) => `https://player.smashy.stream/tv/${id}?s=${s}&e=${e}`,
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Video.js options
-// ---------------------------------------------------------------------------
-const vjsOptions = {
-  autoplay: true,
-  controls: true,
-  fluid: true,
-  playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2],
-  html5: {
-    vhs: {
-      // Let VHS pick the best rendition, honour audio-track selection
-      overrideNative: true,
-      enableLowInitialPlaylist: false,
-      handleManifestRedirects: true,
-    },
-    nativeAudioTracks: false,
-    nativeVideoTracks: false,
-  },
-  controlBar: {
-    children: [
-      'playToggle',
-      'volumePanel',
-      'currentTimeDisplay',
-      'timeDivider',
-      'durationDisplay',
-      'progressControl',
-      'liveDisplay',
-      'seekToLive',
-      'remainingTimeDisplay',
-      'customControlSpacer',
-      'playbackRateMenuButton',
-      'chaptersButton',
-      'audioTrackButton',   // ← multi-audio switcher
-      'subsCapsButton',      // ← subtitles / CC
-      'qualitySelector',     // only if vjs-quality-selector plugin is present
-      'pictureInPictureToggle',
-      'fullscreenToggle',
-    ],
-  },
-};
+const getEmbedUrl = (source, type, id, season, episode) =>
+  type === 'tv' ? source.tv(id, season, episode) : source.movie(id);
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-const Player = () => {
+// ─────────────────────────────────────────────────────────────
+export default function Player() {
   const { type = 'movie', id } = useParams();
   const navigate = useNavigate();
 
-  const videoRef   = useRef(null);
-  const playerRef  = useRef(null);
-  const sourceIdx  = useRef(0);
+  const [sourceIdx, setSourceIdx] = useState(0);
+  const [season] = useState(1);
+  const [episode] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [showUI, setShowUI] = useState(true);
+  const [showSources, setShowSources] = useState(false);
 
-  const [status, setStatus]       = useState('loading');   // loading | playing | error
-  const [sourceLabel, setSourceLabel] = useState('');
-  const [showHeader, setShowHeader]   = useState(true);
+  const hideTimer = useRef(null);
 
-  const sources = buildSources(type, id);
+  const currentSource = SOURCES[sourceIdx];
+  const embedUrl = getEmbedUrl(currentSource, type, id, season, episode);
 
-  // ------------------------------------------------------------------
-  // Try to load a source; on error advance to the next in the chain
-  // ------------------------------------------------------------------
-  const trySource = (player, idx) => {
-    if (idx >= sources.length) {
-      setStatus('error');
-      return;
-    }
-    const src = sources[idx];
-    setSourceLabel(src.label);
+  const resetHideTimer = useCallback(() => {
+    setShowUI(true);
+    clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => {
+      setShowUI(false);
+      setShowSources(false);
+    }, 3500);
+  }, []);
 
-    player.src({ src: src.src, type: src.type });
+  useEffect(() => {
+    resetHideTimer();
+    return () => clearTimeout(hideTimer.current);
+  }, [resetHideTimer]);
 
-    // One-shot error handler — tear it down and try next
-    const onError = () => {
-      player.off('error', onError);
-      trySource(player, idx + 1);
-    };
+  // Reset loading state whenever source / content changes
+  useEffect(() => {
+    setLoading(true);
+    setShowSources(false);
+  }, [sourceIdx, id, type]);
 
-    player.one('error', onError);
-
-    player.one('playing', () => {
-      player.off('error', onError);  // cancel fallback if we start playing
-      setStatus('playing');
-    });
+  const switchSource = (idx) => {
+    setSourceIdx(idx);
+    resetHideTimer();
   };
 
-  // ------------------------------------------------------------------
-  // Initialise Video.js once
-  // ------------------------------------------------------------------
-  useEffect(() => {
-    const vjs = window.videojs;
-    if (!vjs || playerRef.current) return;
+  const handleIframeLoad = () => {
+    setTimeout(() => setLoading(false), 600);
+  };
 
-    const player = vjs(videoRef.current, vjsOptions);
-    playerRef.current = player;
-
-    // Surface any available audio tracks in the UI after metadata loads
-    player.one('loadedmetadata', () => {
-      const tracks = player.audioTracks?.();
-      if (tracks && tracks.length > 1) {
-        // Video.js AudioTrackButton already handles this — just log for debug
-        console.info('[apex] audio tracks:', tracks.length);
-      }
-    });
-
-    // Kick off the source chain
-    trySource(player, 0);
-
-    // Auto-hide header after 3 s of playing
-    let hideTimer;
-    player.on('playing', () => {
-      hideTimer = setTimeout(() => setShowHeader(false), 3000);
-    });
-    player.on('pause', () => {
-      clearTimeout(hideTimer);
-      setShowHeader(true);
-    });
-
-    return () => {
-      clearTimeout(hideTimer);
-      if (playerRef.current) {
-        playerRef.current.dispose();
-        playerRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, id]);
-
-  // ------------------------------------------------------------------
-  // Render
-  // ------------------------------------------------------------------
   return (
-    <div className="fixed inset-0 bg-black z-[100] flex flex-col">
-
-      {/* ── Header overlay ── */}
+    <div
+      className="fixed inset-0 bg-black z-[100] flex flex-col overflow-hidden"
+      onMouseMove={resetHideTimer}
+      onTouchStart={resetHideTimer}
+    >
+      {/* ════ TOP BAR ════ */}
       <div
-        className={`absolute top-0 left-0 right-0 p-4 md:p-6 z-20 flex items-center gap-4
-          bg-gradient-to-b from-black/80 to-transparent
-          transition-opacity duration-500
-          ${showHeader ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-        onMouseEnter={() => setShowHeader(true)}
+        className={`absolute top-0 left-0 right-0 z-30 flex items-center justify-between
+          px-3 md:px-6 py-3 bg-gradient-to-b from-black/95 via-black/60 to-transparent
+          transition-all duration-500
+          ${showUI ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2 pointer-events-none'}`}
       >
-        <button
-          onClick={() => navigate(-1)}
-          className="text-white hover:bg-white/20 p-2 rounded-full transition-colors flex-shrink-0"
-        >
-          <ChevronLeft className="w-7 h-7 md:w-8 md:h-8" />
-        </button>
-        <div className="flex flex-col">
-          <span className="text-white font-bold text-base md:text-xl uppercase tracking-widest leading-none">
-            Now Playing
-          </span>
-          {sourceLabel && (
-            <span className="text-gray-400 text-xs mt-0.5">
-              Source: <span className="text-primeBlue">{sourceLabel}</span>
-            </span>
-          )}
+        {/* Back + title */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate(-1)}
+            className="text-white hover:bg-white/20 p-1.5 rounded-full transition-colors"
+          >
+            <ChevronLeft className="w-6 h-6 md:w-7 md:h-7" />
+          </button>
+          <div className="leading-none">
+            <p className="text-white font-bold text-sm md:text-base uppercase tracking-widest">
+              Now Playing
+            </p>
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              via{' '}
+              <span className="text-[#00a8e1] font-semibold">{currentSource.label}</span>
+            </p>
+          </div>
         </div>
+
+        {/* Source toggle button */}
+        <button
+          onClick={() => { setShowSources((p) => !p); resetHideTimer(); }}
+          className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20
+            border border-white/20 text-white text-xs font-semibold
+            px-3 py-2 rounded-full transition-all backdrop-blur-sm"
+        >
+          <Tv2 className="w-4 h-4" />
+          <span className="hidden sm:inline">Sources</span>
+        </button>
       </div>
 
-      {/* ── Loading spinner ── */}
-      {status === 'loading' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 gap-4">
-          <Loader2 className="w-12 h-12 text-primeBlue animate-spin" />
-          <p className="text-gray-400 text-sm">
-            Connecting to stream{sourceLabel ? ` via ${sourceLabel}` : '…'}
+      {/* ════ SOURCE PICKER ════ */}
+      <div
+        className={`absolute top-[60px] right-3 md:right-6 z-40 w-52
+          bg-[#0d1620]/95 backdrop-blur-md border border-white/10
+          rounded-2xl overflow-hidden shadow-2xl
+          transition-all duration-300 origin-top-right
+          ${showSources ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}`}
+      >
+        <p className="text-gray-500 text-[10px] font-bold uppercase tracking-widest px-4 pt-3 pb-1">
+          Select Source
+        </p>
+        {SOURCES.map((src, idx) => (
+          <button
+            key={src.id}
+            onClick={() => switchSource(idx)}
+            className={`w-full flex items-center justify-between px-4 py-2.5 text-sm
+              font-medium transition-colors hover:bg-white/10
+              ${idx === sourceIdx
+                ? 'text-[#00a8e1] bg-[#00a8e1]/10'
+                : 'text-gray-300'}`}
+          >
+            <span>{src.label}</span>
+            {idx === sourceIdx && (
+              <span className="w-2 h-2 rounded-full bg-[#00a8e1]" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ════ LOADING OVERLAY ════ */}
+      {loading && (
+        <div className="absolute inset-0 z-20 bg-[#0f171e] flex flex-col items-center justify-center gap-6 px-4">
+          {/* Spinner */}
+          <div className="relative w-16 h-16">
+            <div className="absolute inset-0 rounded-full border-4 border-[#00a8e1]/15 border-t-[#00a8e1] animate-spin" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-2 h-2 bg-[#00a8e1] rounded-full animate-pulse" />
+            </div>
+          </div>
+
+          <div className="text-center">
+            <p className="text-white font-semibold text-sm">Loading stream…</p>
+            <p className="text-gray-500 text-xs mt-1">via {currentSource.label}</p>
+          </div>
+
+          {/* Source quick-select chips */}
+          <div className="flex flex-wrap justify-center gap-2 max-w-sm">
+            {SOURCES.map((src, idx) => (
+              <button
+                key={src.id}
+                onClick={() => switchSource(idx)}
+                className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-all
+                  ${idx === sourceIdx
+                    ? 'border-[#00a8e1] text-[#00a8e1] bg-[#00a8e1]/10'
+                    : 'border-white/15 text-gray-500 hover:border-white/30 hover:text-gray-300'}`}
+              >
+                {src.label}
+              </button>
+            ))}
+          </div>
+
+          <p className="text-gray-600 text-[11px] text-center max-w-xs">
+            If nothing plays in a few seconds, tap another source above
           </p>
         </div>
       )}
 
-      {/* ── All-sources-failed error ── */}
-      {status === 'error' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 gap-6 px-6 text-center">
-          <AlertCircle className="w-14 h-14 text-red-500" />
-          <div>
-            <h2 className="text-white text-xl font-bold mb-2">Stream unavailable</h2>
-            <p className="text-gray-400 text-sm max-w-sm">
-              We tried all available sources and couldn't load this title right now.
-              It may be geo-restricted or temporarily offline.
-            </p>
-          </div>
-          <button
-            onClick={() => navigate(-1)}
-            className="bg-primeBlue text-white px-6 py-2.5 rounded font-bold hover:bg-sky-400 transition-colors"
-          >
-            Go back
-          </button>
-        </div>
-      )}
+      {/* ════ IFRAME PLAYER ════ */}
+      <iframe
+        key={`${sourceIdx}-${id}-${type}`}
+        src={embedUrl}
+        onLoad={handleIframeLoad}
+        title="apex video player"
+        className="w-full flex-1 border-0"
+        allowFullScreen
+        allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+        style={{ colorScheme: 'normal', display: 'block' }}
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation allow-top-navigation-by-user-activation"
+      />
 
-      {/* ── Video.js player ── */}
+      {/* ════ BOTTOM BAR ════ */}
       <div
-        data-vjs-player
-        className="flex-grow flex items-center justify-center"
-        onMouseMove={() => {
-          setShowHeader(true);
-          // Re-hide after 3 s of no movement while playing
-          if (playerRef.current && !playerRef.current.paused()) {
-            clearTimeout(window._apexHideTimer);
-            window._apexHideTimer = setTimeout(() => setShowHeader(false), 3000);
-          }
-        }}
+        className={`absolute bottom-0 left-0 right-0 z-30 px-4 py-2.5
+          bg-gradient-to-t from-black/90 via-black/30 to-transparent
+          flex items-center justify-between
+          transition-all duration-500
+          ${showUI ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'}`}
       >
-        <video
-          ref={videoRef}
-          className="video-js vjs-big-play-centered vjs-theme-city w-full h-full"
-          crossOrigin="anonymous"
-        />
+        <p className="text-[11px] text-gray-600">
+          apex<span className="text-[#00a8e1]">videos</span>
+          <span className="mx-1.5 text-gray-700">·</span>
+          Stream may contain provider ads
+        </p>
+
+        <button
+          onClick={() => { setLoading(true); resetHideTimer(); }}
+          className="flex items-center gap-1 text-gray-500 hover:text-white text-xs transition-colors"
+        >
+          <RefreshCw className="w-3 h-3" />
+          <span className="hidden sm:inline">Reload</span>
+        </button>
       </div>
     </div>
   );
-};
-
-export default Player;
+}
