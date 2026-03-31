@@ -16,7 +16,7 @@ import {
 // ─── Backend URL ──────────────────────────────────────────────────────────────
 // In development: http://localhost:3001
 // In production:  your Render URL (set VITE_STREAM_API in Vercel env vars)
-const API = (import.meta.env.VITE_STREAM_API || 'http://localhost:3001').replace(/\/$/, '')
+const API = 'https://apex-stream-api.onrender.com' // Use your ACTUAL Render URL here
 
 // ─── Load hls.js from CDN (no npm install) ───────────────────────────────────
 let _hlsPromise = null
