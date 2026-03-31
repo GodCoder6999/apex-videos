@@ -1,4 +1,3 @@
-// src/pages/Player.jsx
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
@@ -8,11 +7,8 @@ import {
   Gauge, Loader2,
 } from 'lucide-react'
 
-// ─── Consumet API Base ────────────────────────────────────────────────────────
-// Using the public API. If this goes down, you can swap it for a community clone.
-const CONSUMET_API = 'https://api.consumet.org';
+const API = (import.meta.env.VITE_STREAM_API || 'http://localhost:3001').replace(/\/$/, '')
 
-// ─── Load hls.js from CDN ────────────────────────────────────────────────────
 let _hlsPromise = null
 function loadHls() {
   if (_hlsPromise) return _hlsPromise
@@ -86,65 +82,37 @@ export default function Player() {
 
   useEffect(() => { resetHide(); return () => clearTimeout(hideTimer.current) }, [resetHide])
 
-  // ── Boot: Ask Consumet for stream URL ──────────────────────────────────────
   const boot = useCallback(async () => {
     setLoadState('loading')
-    setSrcLabel('Consumet API')
+    setSrcLabel('')
     setAudioTracks([])
     setQualities([])
     setSubTracks([])
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
 
-    let m3u8Url = '';
-
+    let m3u8, source
     try {
-      // Step 1: Get the Media Info from Consumet (TMDB Provider)
-      const infoUrl = `${CONSUMET_API}/meta/tmdb/info/${id}?type=${type}`;
-      const infoResp = await fetch(infoUrl);
-      const infoData = await infoResp.json();
-
-      if (!infoData || !infoData.id) throw new Error("Media not found on streaming servers.");
-
-      // Step 2: Find the exact episode ID to watch
-      let watchId = infoData.episodeId || infoData.id; 
-      
-      if (type === 'tv') {
-        const ep = infoData.episodes?.find(e => e.season === season && e.number === episode);
-        if (!ep) throw new Error(`Season ${season} Episode ${episode} not found.`);
-        watchId = ep.id;
-      }
-
-      // Step 3: Fetch the actual stream links
-      const watchUrl = `${CONSUMET_API}/meta/tmdb/watch/${watchId}?id=${id}`;
-      const watchResp = await fetch(watchUrl);
-      const watchData = await watchResp.json();
-
-      if (!watchData.sources || watchData.sources.length === 0) {
-         throw new Error("No playable sources returned.");
-      }
-
-      // Find the 'auto' quality source, or default to the first available
-      const bestSource = watchData.sources.find(s => s.quality === 'auto') || watchData.sources[0];
-      m3u8Url = bestSource.url;
-
-      // Extract subtitles if Consumet provides them
-      if (watchData.subtitles) {
-         // Subtitles handled by video player track logic below
-      }
-
+      const qs   = type === 'tv' ? `?s=${season}&e=${episode}` : ''
+      const resp = await fetch(`${API}/api/stream/${type}/${id}${qs}`)
+      const json = await resp.json()
+      if (!json.ok) throw new Error(json.error || 'Backend failed to fetch stream')
+      m3u8   = json.m3u8
+      source = json.source
     } catch (e) {
       setLoadState('error')
-      setErrorMsg(`Could not fetch stream: ${e.message}`)
+      setErrorMsg(`Connection error: ${e.message}`)
       return
     }
 
-    // Initialize HLS.js with the Consumet m3u8 link
+    const proxiedM3u8 = m3u8.startsWith('http') ? m3u8 : `${API}${m3u8}`
+    setSrcLabel(source)
+
     const Hls = await loadHls()
     const video = videoRef.current
     if (!video) return
 
     if (!Hls || !Hls.isSupported()) {
-      video.src = m3u8Url
+      video.src = proxiedM3u8
       video.play().catch(() => {})
       setLoadState('playing')
       return
@@ -153,7 +121,7 @@ export default function Player() {
     const hls = new Hls({ enableWorker: true })
     hlsRef.current = hls
 
-    hls.loadSource(m3u8Url)
+    hls.loadSource(proxiedM3u8)
     hls.attachMedia(video)
 
     hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
@@ -162,14 +130,32 @@ export default function Player() {
         ...data.levels.map((l, i) => ({ id: i, label: l.height ? `${l.height}p` : `Level ${i + 1}` })),
       ])
       setActiveQuality(-1)
+
+      const at = hls.audioTracks || []
+      if (at.length > 0) {
+        setAudioTracks(at.map((t, i) => ({ id: i, label: t.name || t.lang || `Track ${i + 1}` })))
+        setActiveAudio(hls.audioTrack)
+      }
+
+      const st = hls.subtitleTracks || []
+      setSubTracks([
+        { id: -1, label: 'Off' },
+        ...st.map((t, i) => ({ id: i, label: t.name || t.lang || `Sub ${i + 1}` })),
+      ])
+
       setLoadState('playing')
       video.play().catch(() => {})
     })
 
+    hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_, d) => {
+      setAudioTracks(d.audioTracks.map((t, i) => ({ id: i, label: t.name || t.lang || `Track ${i + 1}` })))
+    })
+    hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_, d) => setActiveAudio(d.id))
+
     hls.on(Hls.Events.ERROR, (_, d) => {
       if (d.fatal) {
         setLoadState('error')
-        setErrorMsg('Video playback error. The stream might be blocked or expired.')
+        setErrorMsg('Stream failed to load. Try refreshing.')
       }
     })
   }, [type, id, season, episode])
@@ -179,7 +165,6 @@ export default function Player() {
     return () => { if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null } }
   }, [boot])
 
-  // ── Video listeners ─────────────────────────────────────────────────────────
   useEffect(() => {
     const v = videoRef.current; if (!v) return
     const handlers = {
@@ -203,7 +188,6 @@ export default function Player() {
     return () => document.removeEventListener('fullscreenchange', fn)
   }, [])
 
-  // ── Keyboard ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const onKey = e => {
       if (['INPUT','TEXTAREA'].includes(e.target.tagName)) return
@@ -225,13 +209,14 @@ export default function Player() {
     return () => window.removeEventListener('keydown', onKey)
   }, [duration, resetHide])
 
-  // ── Controls ────────────────────────────────────────────────────────────────
   const togglePlay = () => { const v = videoRef.current; if (!v) return; v.paused ? v.play() : v.pause(); resetHide() }
   const toggleMute = () => { const v = videoRef.current; if (!v) return; v.muted = !v.muted }
   const setVol     = val => { const v = videoRef.current; if (!v) return; v.volume = val; v.muted = val === 0 }
   const toggleFs   = () => document.fullscreenElement ? document.exitFullscreen() : containerRef.current?.requestFullscreen()
   const setSpeedFn = r  => { if (videoRef.current) videoRef.current.playbackRate = r; setSpeed(r) }
+  const switchAudio = id => { if (hlsRef.current) hlsRef.current.audioTrack = id; setActiveAudio(id) }
   const switchQ    = id => { if (hlsRef.current) hlsRef.current.currentLevel = id; setActiveQuality(id) }
+  const switchSub  = id => { if (hlsRef.current) { hlsRef.current.subtitleTrack = id; hlsRef.current.subtitleDisplay = id !== -1 }; setActiveSub(id) }
 
   const seek = e => {
     const bar = seekRef.current; if (!bar || !duration) return
@@ -245,18 +230,14 @@ export default function Player() {
   const pctBuffered = duration ? (buffered / duration) * 100 : 0
 
   return (
-    <div
-      ref={containerRef}
-      className="fixed inset-0 bg-black z-[100] flex flex-col overflow-hidden select-none"
-      onMouseMove={resetHide}
-      onTouchStart={resetHide}
-    >
+    <div ref={containerRef} className="fixed inset-0 bg-black z-[100] flex flex-col overflow-hidden select-none" onMouseMove={resetHide} onTouchStart={resetHide}>
       <video ref={videoRef} className="w-full h-full object-contain" playsInline crossOrigin="anonymous" onClick={togglePlay} />
 
       {loadState === 'loading' && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-[#0f171e]">
           <div className="w-16 h-16 rounded-full border-4 border-[#00a8e1]/20 border-t-[#00a8e1] animate-spin" />
-          <p className="text-white font-semibold text-sm">Fetching stream from Consumet…</p>
+          <p className="text-white font-semibold text-sm">Fetching stream from API…</p>
+          {srcLabel && <p className="text-gray-500 text-xs">via {srcLabel}</p>}
         </div>
       )}
 
@@ -279,28 +260,25 @@ export default function Player() {
       )}
 
       {loadState !== 'error' && (
-        <div
-          className={`absolute inset-0 z-30 flex flex-col justify-between pointer-events-none transition-opacity duration-400 ${showUI ? 'opacity-100' : 'opacity-0'}`}
-          style={{ pointerEvents: showUI ? 'auto' : 'none' }}
-        >
+        <div className={`absolute inset-0 z-30 flex flex-col justify-between pointer-events-none transition-opacity duration-400 ${showUI ? 'opacity-100' : 'opacity-0'}`} style={{ pointerEvents: showUI ? 'auto' : 'none' }}>
           <div className="flex items-center gap-3 px-4 md:px-6 py-4 bg-gradient-to-b from-black/90 via-black/40 to-transparent">
-            <button onClick={() => navigate(-1)} className="text-white hover:bg-white/20 p-1.5 rounded-full transition-colors flex-shrink-0 pointer-events-auto">
+            <button onClick={() => navigate(-1)} className="text-white hover:bg-white/20 p-1.5 rounded-full transition-colors flex-shrink-0">
               <ChevronLeft className="w-7 h-7" />
             </button>
             <div className="flex-1 min-w-0">
               <p className="text-white font-bold text-sm md:text-base uppercase tracking-widest leading-none">Now Playing</p>
+              {srcLabel && <p className="text-[11px] text-gray-400 mt-0.5">via <span className="text-[#00a8e1] font-semibold">{srcLabel}</span></p>}
             </div>
-            <button onClick={boot} title="Refresh stream" className="text-gray-400 hover:text-white p-1.5 rounded-full hover:bg-white/10 transition-colors pointer-events-auto">
+            <button onClick={boot} title="Refresh stream" className="text-gray-400 hover:text-white p-1.5 rounded-full hover:bg-white/10 transition-colors">
               <RefreshCw className="w-5 h-5" />
             </button>
           </div>
 
-          <button onClick={togglePlay}
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center hover:bg-black/60 hover:scale-110 transition-all pointer-events-auto">
+          <button onClick={togglePlay} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center hover:bg-black/60 hover:scale-110 transition-all">
             {playing ? <Pause fill="white" className="w-9 h-9 text-white" /> : <Play fill="white" className="w-9 h-9 text-white ml-1" />}
           </button>
 
-          <div className="px-4 md:px-6 pb-4 pt-2 bg-gradient-to-t from-black/95 via-black/50 to-transparent pointer-events-auto">
+          <div className="px-4 md:px-6 pb-4 pt-2 bg-gradient-to-t from-black/95 via-black/50 to-transparent">
             <div ref={seekRef} onClick={seek} className="relative h-[5px] mb-4 rounded-full bg-white/20 cursor-pointer group">
               <div className="absolute inset-y-0 left-0 rounded-full bg-white/25 pointer-events-none" style={{ width: `${pctBuffered}%` }} />
               <div className="absolute inset-y-0 left-0 rounded-full bg-[#00a8e1] pointer-events-none" style={{ width: `${pctPlayed}%` }} />
@@ -316,11 +294,11 @@ export default function Player() {
               <button onClick={toggleMute} className="text-white hover:text-[#00a8e1] transition-colors">
                 {muted || volume === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
               </button>
-              <input type="range" min="0" max="1" step="0.02" value={muted ? 0 : volume} onChange={e => setVol(parseFloat(e.target.value))} className="w-20 md:w-28 accent-[#00a8e1] cursor-pointer" />
+              <input type="range" min="0" max="1" step="0.02" value={muted ? 0 : volume} onChange={e => setVol(parseFloat(e.target.value))} onClick={e => e.stopPropagation()} className="w-20 md:w-28 accent-[#00a8e1] cursor-pointer" />
               <span className="text-white/80 text-xs font-mono tabular-nums ml-1 hidden sm:inline">{fmt(current)} / {fmt(duration)}</span>
               <div className="flex-1" />
 
-              <div className="relative">
+              <div className="relative" onClick={e => e.stopPropagation()}>
                 <button onClick={() => { setShowPanel(p => !p); resetHide() }} className={`p-1.5 rounded-lg transition-colors hover:bg-white/10 ${showPanel ? 'text-[#00a8e1]' : 'text-white'}`}>
                   <Settings className="w-5 h-5" />
                 </button>
@@ -329,30 +307,67 @@ export default function Player() {
                   <div className="absolute bottom-12 right-0 w-72 rounded-2xl overflow-hidden shadow-2xl bg-[#0d1620]/98 border border-white/10 backdrop-blur-xl z-40">
                     <div className="flex border-b border-white/10">
                       {[
-                        { id: 'quality', icon: <Gauge className="w-4 h-4" />, label: 'Quality' },
-                        { id: 'speed',   icon: <Gauge className="w-4 h-4" />, label: 'Speed'   },
+                        { id: 'audio',   icon: <Languages className="w-4 h-4" />, label: 'Audio'   },
+                        { id: 'quality', icon: <Gauge      className="w-4 h-4" />, label: 'Quality' },
+                        { id: 'speed',   icon: <Gauge      className="w-4 h-4" />, label: 'Speed'   },
+                        { id: 'subs',    icon: <Settings   className="w-3 h-3" />, label: 'Subs'    },
                       ].map(tab => (
                         <button key={tab.id} onClick={() => setPanelTab(tab.id)} className={`flex-1 flex flex-col items-center gap-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${panelTab === tab.id ? 'text-[#00a8e1] border-b-2 border-[#00a8e1]' : 'text-gray-500 hover:text-gray-300'}`}>
-                          {tab.label}
+                          {tab.icon}{tab.label}
                         </button>
                       ))}
                     </div>
-                    {panelTab === 'quality' && (
+
+                    {panelTab === 'audio' && (
                       <div className="max-h-56 overflow-y-auto py-1">
-                        {qualities.map(q => (
-                          <button key={q.id} onClick={() => switchQ(q.id)} className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-colors hover:bg-white/10 ${q.id === activeQuality ? 'text-[#00a8e1] bg-[#00a8e1]/8' : 'text-gray-300'}`}>
-                            <span>{q.label}</span>
-                          </button>
-                        ))}
+                        {audioTracks.length === 0
+                          ? <p className="text-gray-600 text-xs text-center py-8 px-4">No alternate audio tracks.</p>
+                          : audioTracks.map(t => (
+                            <button key={t.id} onClick={() => switchAudio(t.id)} className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-colors hover:bg-white/10 ${t.id === activeAudio ? 'text-[#00a8e1] bg-[#00a8e1]/8' : 'text-gray-300'}`}>
+                              <span>{t.label}</span>
+                              {t.id === activeAudio && <span className="w-2 h-2 rounded-full bg-[#00a8e1]" />}
+                            </button>
+                          ))
+                        }
                       </div>
                     )}
+
+                    {panelTab === 'quality' && (
+                      <div className="max-h-56 overflow-y-auto py-1">
+                        {qualities.length === 0
+                          ? <p className="text-gray-600 text-xs text-center py-8">Loading…</p>
+                          : qualities.map(q => (
+                            <button key={q.id} onClick={() => switchQ(q.id)} className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-colors hover:bg-white/10 ${q.id === activeQuality ? 'text-[#00a8e1] bg-[#00a8e1]/8' : 'text-gray-300'}`}>
+                              <span>{q.label}</span>
+                              {q.id === activeQuality && <span className="w-2 h-2 rounded-full bg-[#00a8e1]" />}
+                            </button>
+                          ))
+                        }
+                      </div>
+                    )}
+
                     {panelTab === 'speed' && (
                       <div className="py-1">
                         {SPEEDS.map(r => (
                           <button key={r} onClick={() => setSpeedFn(r)} className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-colors hover:bg-white/10 ${r === speed ? 'text-[#00a8e1] bg-[#00a8e1]/8' : 'text-gray-300'}`}>
                             <span>{r === 1 ? 'Normal' : `${r}×`}</span>
+                            {r === speed && <span className="w-2 h-2 rounded-full bg-[#00a8e1]" />}
                           </button>
                         ))}
+                      </div>
+                    )}
+
+                    {panelTab === 'subs' && (
+                      <div className="max-h-56 overflow-y-auto py-1">
+                        {subTracks.length <= 1
+                          ? <p className="text-gray-600 text-xs text-center py-8">No subtitles in this stream.</p>
+                          : subTracks.map(t => (
+                            <button key={t.id} onClick={() => switchSub(t.id)} className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-colors hover:bg-white/10 ${t.id === activeSub ? 'text-[#00a8e1] bg-[#00a8e1]/8' : 'text-gray-300'}`}>
+                              <span>{t.label}</span>
+                              {t.id === activeSub && <span className="w-2 h-2 rounded-full bg-[#00a8e1]" />}
+                            </button>
+                          ))
+                        }
                       </div>
                     )}
                   </div>
