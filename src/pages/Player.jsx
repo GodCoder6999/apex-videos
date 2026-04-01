@@ -274,14 +274,38 @@ export default function Player() {
       const json = await safeJsonFetch(nuvioUrl)
       stepTimers.current.forEach(clearTimeout)
 
-      if (!json?.streams?.length) throw new Error('No streams found for this title.')
+      const validStreams = (json?.streams || []).filter(s => s.url)
+      if (!validStreams.length) throw new Error('No streams found for this title.')
 
-      const stream = json.streams.find(s => s.url)
-      if (!stream) throw new Error('No playable stream URL found.')
+      // ──────────────────────────────────────────────────────────────────
+      // FIX: SMART STREAM SCORING
+      // Browsers hate MKV and x265. Prioritize m3u8, then mp4, then mkv.
+      // ──────────────────────────────────────────────────────────────────
+      const getScore = (s) => {
+        const url = (s.url || '').toLowerCase()
+        const title = (s.title || '').toLowerCase()
+        let score = 0
+        
+        // Formats
+        if (url.includes('.m3u8')) score += 100 // Top priority: Native Web HLS
+        else if (url.includes('.mp4')) score += 50 // High priority: Native Web MP4
+        else if (url.includes('.mkv')) score -= 20 // Low priority: Browsers struggle with MKV
 
-      // 3. Conditional Proxying
-      // Only wrap .m3u8 files in the proxy. MP4/MKV files bypass it to avoid crashing Vercel memory.
-      const isHls = /\.m3u8/i.test(stream.url)
+        // Codecs (Avoid HEVC/x265 if possible because browsers can't play it)
+        if (title.includes('hevc') || title.includes('x265') || title.includes('h265')) {
+            score -= 50
+        }
+        
+        return score
+      }
+
+      validStreams.sort((a, b) => getScore(b) - getScore(a))
+      
+      // Select the best format found
+      const stream = validStreams[0]
+
+      // Only proxy m3u8 files. Direct files (MP4/MKV) bypass proxy to prevent memory crashing
+      const isHls = /\.m3u8/i.test(stream.url) || stream.url.includes('.m3u8')
       m3u8 = isHls 
         ? `/api/proxy?url=${encodeURIComponent(stream.url)}` 
         : stream.url
@@ -305,7 +329,6 @@ export default function Player() {
     const video2 = videoRef.current
     if (!video2) return
 
-    // Ensure we handle HTTP direct formats accurately
     const isM3U8 = /\.m3u8/i.test(m3u8) || decodeURIComponent(m3u8).includes('.m3u8')
 
     // ── Native fallback (For direct MP4s / MKVs or Safari) ──────────────────
@@ -313,7 +336,15 @@ export default function Player() {
       video2.src = m3u8
       setLoadState('playing')
       setLoadProgress(100)
-      video2.play().catch(() => setPlaying(false))
+      
+      video2.play().catch((err) => {
+        console.error("Playback error:", err)
+        setPlaying(false)
+        if (err.name === 'NotSupportedError') {
+           setLoadState('error')
+           setErrorMsg('Your browser does not support this video format (likely an unsupported MKV or HEVC codec). Please try another stream or use a different browser.')
+        }
+      })
       return
     }
 
@@ -450,6 +481,12 @@ export default function Player() {
     const onWaiting        = () => setIsBuffering(true)
     const onPlaying        = () => setIsBuffering(false)
     const onCanPlay        = () => setIsBuffering(false)
+    const onError          = () => {
+      if(v.error && v.error.code === 4) { // MEDIA_ERR_SRC_NOT_SUPPORTED
+         setLoadState('error')
+         setErrorMsg('Browser does not support this file format (likely an unsupported MKV or HEVC codec).')
+      }
+    }
 
     v.addEventListener('play',           onPlay)
     v.addEventListener('pause',          onPause)
@@ -460,6 +497,7 @@ export default function Player() {
     v.addEventListener('waiting',        onWaiting)
     v.addEventListener('playing',        onPlaying)
     v.addEventListener('canplay',        onCanPlay)
+    v.addEventListener('error',          onError)
 
     return () => {
       v.removeEventListener('play',           onPlay)
@@ -471,6 +509,7 @@ export default function Player() {
       v.removeEventListener('waiting',        onWaiting)
       v.removeEventListener('playing',        onPlaying)
       v.removeEventListener('canplay',        onCanPlay)
+      v.removeEventListener('error',          onError)
     }
   }, []) // eslint-disable-line
 
