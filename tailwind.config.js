@@ -7,8 +7,8 @@ export default {
   theme: {
     extend: {
       colors: {
-        primeBg: '#0f171e',
-        primeHover: '#1a242f',
+        primeBg: '#00050D',
+        primeHover: '#333333',
         primeBlue: '#00a8e1'
       }
     },
