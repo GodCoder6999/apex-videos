@@ -86,7 +86,7 @@ export default function Player() {
   const [showUI,        setShowUI]        = useState(true)
   const [showPanel,     setShowPanel]     = useState(false)
   const [panelTab,      setPanelTab]      = useState('audio')
-  const [loadState,     setLoadState]     = useState('loading') // loading | playing | error
+  const [loadState,     setLoadState]     = useState('loading') 
   const [errorMsg,      setErrorMsg]      = useState('')
   const [srcLabel,      setSrcLabel]      = useState('')
   const [loadStep,      setLoadStep]      = useState(LOAD_STEPS[0].msg)
@@ -134,7 +134,7 @@ export default function Player() {
 
     let m3u8, source
     try {
-      // 1. Get IMDB ID (Nuvio relies heavily on IMDB Identifiers for accuracy)
+      // 1. Get IMDB ID 
       let streamId = `tmdb:${id}`
       try {
          const tmdbUrl = `${BASE_URL}/${type}/${id}/external_ids?api_key=${API_KEY}`
@@ -149,10 +149,9 @@ export default function Player() {
          }
       } catch (e) {
          if (type === 'tv') streamId = `tmdb:${id}:${season}:${episode}`
-         console.warn("Failed to fetch IMDB ID, falling back to TMDB ID", e)
       }
 
-      // 2. Fetch Streams directly from Nuvio API
+      // 2. Fetch Streams 
       const nuvioUrl = `https://nuviostreams.hayd.uk/stream/${type}/${streamId}.json`
       const json = await safeJsonFetch(nuvioUrl)
       stepTimers.current.forEach(clearTimeout)
@@ -161,12 +160,11 @@ export default function Player() {
          throw new Error('No streams found on Nuvio for this title.')
       }
 
-      // 3. Find the first playable valid stream
+      // 3. Find playable stream
       const stream = json.streams.find(s => s.url)
       if (!stream) throw new Error('No playable stream URL found.')
 
       m3u8 = stream.url
-      // Map Nuvio's provider name/metadata
       source = stream.name ? `${stream.name} - ${stream.title?.split('\n')[0] || 'Auto'}` : 'Nuvio Streams'
 
     } catch (e) {
@@ -186,10 +184,10 @@ export default function Player() {
 
     const isM3U8 = m3u8.includes('.m3u8')
 
-    // If it's an MP4/MKV fallback or if HLS isn't supported on device
+    // Native Fallback
     if (!isM3U8 || !Hls || !Hls.isSupported()) {
       video.src = m3u8
-      video.play().catch(() => {})
+      video.play().catch(() => setPlaying(false))
       setLoadState('playing')
       setLoadProgress(100)
       return
@@ -198,19 +196,19 @@ export default function Player() {
     // Connect to HLS
     const hls = new Hls({
       enableWorker: true,
-      xhrSetup: xhr => { xhr.withCredentials = false },
       manifestLoadingMaxRetry: 4,
       levelLoadingMaxRetry: 4,
       fragLoadingMaxRetry: 6,
-      fragLoadingTimeOut: 30000,
-      manifestLoadingTimeOut: 30000,
       startLevel: -1,
-      abrEwmaDefaultEstimate: 1000000,
     })
     
     hlsRef.current = hls
-    hls.loadSource(m3u8)
+
+    // Fix 1: Attach media FIRST, then load source on MEDIA_ATTACHED
     hls.attachMedia(video)
+    hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+      hls.loadSource(m3u8)
+    })
 
     hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
       setQualities([
@@ -222,7 +220,8 @@ export default function Player() {
       const at = hls.audioTracks || []
       if (at.length) {
         setAudioTracks(at.map((t, i) => ({ id: i, label: t.name || t.lang || `Track ${i+1}` })))
-        setActiveAudio(hls.audioTrack)
+        // Fix 3: Ensure a default audio track is selected in the UI
+        setActiveAudio(hls.audioTrack !== -1 ? hls.audioTrack : 0)
       }
       
       const st = hls.subtitleTracks || []
@@ -230,12 +229,16 @@ export default function Player() {
 
       setLoadState('playing')
       setLoadProgress(100)
-      video.play().catch(() => {})
+      video.play().catch(() => setPlaying(false))
     })
 
-    hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_, d) =>
-      setAudioTracks(d.audioTracks.map((t, i) => ({ id: i, label: t.name || t.lang || `Track ${i+1}` }))))
-    hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_, d) => setActiveAudio(d.id))
+    hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_, d) => {
+      setAudioTracks(d.audioTracks.map((t, i) => ({ id: i, label: t.name || t.lang || `Track ${i+1}` })))
+    })
+    
+    hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_, d) => {
+      setActiveAudio(d.id)
+    })
 
     hls.on(Hls.Events.ERROR, (_, d) => {
       if (d.fatal) {
@@ -273,7 +276,6 @@ export default function Player() {
       },
       loadedmetadata: () => {
         setDuration(v.duration)
-        // Fallback for native embedded audio tracks (MP4/MKV format) if HLS is not used
         if (!hlsRef.current && v.audioTracks && v.audioTracks.length > 0) {
           const tracks = [];
           for (let i = 0; i < v.audioTracks.length; i++) {
@@ -327,7 +329,6 @@ export default function Player() {
   const switchQ    = i => { if (hlsRef.current) hlsRef.current.currentLevel = i; setActiveQuality(i) }
   const switchSub  = i => { if (hlsRef.current) { hlsRef.current.subtitleTrack = i; hlsRef.current.subtitleDisplay = i !== -1 }; setActiveSub(i) }
 
-  // Dual Switch Audio API (Supports HLS generated tracks & Native embedded browser tracks)
   const switchAudio = i => { 
     if (hlsRef.current) {
       hlsRef.current.audioTrack = i; 
@@ -361,7 +362,8 @@ export default function Player() {
         ref={videoRef}
         className="w-full h-full object-contain"
         playsInline
-        crossOrigin="anonymous"
+        autoPlay
+        /* Fix 2: Removed crossOrigin="anonymous" to prevent native stream blocking */
         onClick={togglePlay}
       />
 
