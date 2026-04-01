@@ -1,6 +1,6 @@
 // src/components/Row.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { ChevronRight, ChevronLeft, Play, Plus, Volume2, VolumeX } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Play, Plus, Volume2, VolumeX, Ban, PlaySquare } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { motion, useInView, AnimatePresence } from 'framer-motion'
 
@@ -153,7 +153,6 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
       onMouseEnter={() => setIsRowHovered(true)}
       onMouseLeave={() => setIsRowHovered(false)}
     >
-      {/* Row title + mute button */}
       <div className="flex items-center justify-between pl-4 md:pl-10 pr-4 md:pr-10 mb-2">
         <motion.div
           variants={rowTitleVariants}
@@ -192,10 +191,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
       </div>
 
       <div className="relative">
-        
-        {/* Adjusted absolute wrapper height to exactly match the new card sizes */}
         <div className={`absolute left-0 right-0 top-[20px] pointer-events-none flex items-center justify-between z-[50000] ${isLargeRow ? 'h-[584px]' : 'h-[158px]'}`}>
-          
           <AnimatePresence>
             {canScrollL && (
               <motion.div
@@ -220,10 +216,8 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
           <div className="absolute right-2 md:right-4 z-[50000]">
             <ScrollArrow dir="right" onClick={() => scroll('right')} visible={canScrollR && isRowHovered} />
           </div>
-
         </div>
 
-        {/* Scrollable track */}
         <div
           ref={rowRef}
           className={`row-scroll-outer px-4 md:px-10 ${isLargeRow ? 'tall-row' : ''}`}
@@ -242,7 +236,6 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                   variants={cardVariants}
                   initial="hidden"
                   animate={inView ? 'visible' : 'hidden'}
-                  /* EXPLICIT CARD SIZES APPLIED HERE */
                   className={`movie-card ${isLargeRow ? 'w-[368px] h-[584px]' : 'w-[280px] h-[158px]'}`}
                   onMouseEnter={() => setHoveredId(movie.id)}
                   onMouseLeave={() => setHoveredId(null)}
@@ -260,9 +253,9 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                   {/* Hover popup linking to our CSS classes for explicit bounds */}
                   <div className={`hover-popup ${isLargeRow ? 'large-popup' : 'normal-popup'}`}>
                     
-                    {/* Preview area -> scaled up to occupy the massive new popup bounds nicely */}
+                    {/* Top half: Exactly 237px height */}
                     <div
-                      className={`relative w-full overflow-hidden bg-black cursor-pointer ${isLargeRow ? 'h-[75%]' : 'h-[335px]'}`}
+                      className={`relative w-full overflow-hidden bg-black cursor-pointer ${isLargeRow ? 'h-[75%]' : 'h-[237px]'}`}
                       onClick={() => navigate(`/detail/${mtype}/${movie.id}`, { state: { movie } })}
                     >
                       <img
@@ -273,12 +266,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
 
                       {isHov && <TrailerEmbed movieId={movie.id} type={mtype} muted={globalMuted} />}
 
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#1a242f] via-black/20 to-transparent z-20" />
-
-                      <div className="absolute bottom-4 right-4 flex items-center gap-1.5 text-xs text-white/90 font-bold z-30">
-                        <span className="w-5 h-5 rounded-full border border-white/70 flex items-center justify-center text-[9px]">▶</span>
-                        Apex Player
-                      </div>
+                      <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent z-20" />
 
                       {isHov && (
                         <motion.button
@@ -287,7 +275,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                           exit={{ opacity: 0, scale: 0.7 }}
                           transition={{ duration: 0.2, delay: 0.3 }}
                           onClick={e => { e.stopPropagation(); setGlobalMuted(m => !m) }}
-                          className="absolute bottom-4 left-4 z-30 w-8 h-8 rounded-full bg-black/60 border border-white/30 flex items-center justify-center text-white hover:bg-white hover:text-black transition-colors duration-150"
+                          className="absolute bottom-3 right-3 z-30 w-8 h-8 rounded-full bg-black/60 border border-white/30 flex items-center justify-center text-white hover:bg-white hover:text-black transition-colors duration-150"
                         >
                           {globalMuted
                             ? <VolumeX className="w-4 h-4" />
@@ -297,44 +285,69 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                       )}
                     </div>
 
-                    {/* Info section (takes up remaining space in the Flex column popup) */}
-                    <div className="flex-1 p-5 bg-[#1a242f] flex flex-col justify-center">
+                    {/* Bottom half: Exactly 256px height, with padding 10px 20px 20px */}
+                    <div className={`w-full bg-[#000000] flex flex-col ${isLargeRow ? 'flex-1 p-5' : 'h-[256px] p-[10px_20px_20px]'}`}>
+                      
                       <h3
                         onClick={() => navigate(`/detail/${mtype}/${movie.id}`, { state: { movie } })}
-                        className="text-xl font-bold text-white mb-3 leading-tight truncate cursor-pointer hover:underline"
+                        className="text-[20px] font-bold text-white mb-0.5 leading-tight truncate cursor-pointer hover:text-primeBlue transition-colors"
                       >
                         {movie.title || movie.name}
                       </h3>
+                      
+                      <div className="flex items-center gap-1.5 mb-3 text-[11px] font-semibold text-primeBlue opacity-90">
+                         <span className="w-3.5 h-3.5 rounded-full bg-primeBlue text-black flex items-center justify-center text-[8px]">✓</span>
+                         Apex Player (Included)
+                      </div>
 
-                      <div className="flex items-center gap-3 mb-4">
+                      <div className="flex items-center gap-2.5 mb-3">
+                        {/* Light blue play button similar to screenshot */}
                         <motion.button
-                          whileHover={{ scale: 1.03 }}
-                          whileTap={{ scale: 0.96 }}
-                          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
                           onClick={e => { e.stopPropagation(); navigate(`/play/${mtype}/${movie.id}`) }}
-                          className="flex-1 flex items-center justify-center gap-2 bg-white text-black py-2.5 rounded-md font-bold text-sm hover:bg-gray-100 transition-colors duration-150"
+                          className="flex-[2] flex items-center justify-center gap-2 bg-[#a8c7fa] text-[#052d49] py-2.5 rounded-md font-bold text-[15px] hover:bg-[#8ab4f8] transition-colors duration-150"
                         >
-                          <Play fill="currentColor" className="w-4 h-4" /> Play
+                          <Play fill="currentColor" className="w-5 h-5" /> Play
                         </motion.button>
+                        
                         <motion.button
-                          whileHover={{ scale: 1.08 }}
-                          whileTap={{ scale: 0.92 }}
-                          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                          className="w-10 h-10 rounded-full border-2 border-gray-500 flex items-center justify-center text-white hover:border-white transition-colors duration-150 bg-white/5"
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="w-10 h-10 rounded-full border border-gray-500 flex items-center justify-center text-white hover:border-white transition-colors duration-150 bg-white/10"
+                        >
+                          <PlaySquare className="w-5 h-5" />
+                        </motion.button>
+                        
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="w-10 h-10 rounded-full border border-gray-500 flex items-center justify-center text-white hover:border-white transition-colors duration-150 bg-white/10"
                         >
                           <Plus className="w-5 h-5" />
                         </motion.button>
+                        
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="w-10 h-10 rounded-full border border-gray-500 flex items-center justify-center text-white hover:border-white transition-colors duration-150 bg-white/10"
+                        >
+                          <Ban className="w-4 h-4" />
+                        </motion.button>
                       </div>
 
-                      <div className="flex items-center gap-2.5 text-xs text-gray-400 mb-3 font-semibold">
-                        <span className="border border-gray-600 px-1.5 py-0.5 rounded text-gray-300">U/A 16+</span>
+                      <div className="flex items-center gap-2.5 text-[12px] text-gray-400 mb-2 font-medium">
+                        <span className="bg-gray-800 text-gray-200 px-1.5 py-0.5 rounded text-[10px] font-bold">U/A 16+</span>
+                        <span className="bg-gray-800 text-gray-200 px-1.5 py-0.5 rounded text-[10px] font-bold">CC</span>
                         <span>{movie.release_date?.substring(0,4) || movie.first_air_date?.substring(0,4)}</span>
-                        <span className="text-primeBlue">Apex</span>
                         {movie.vote_average > 0 && (
-                          <span className="text-yellow-500 font-bold ml-auto">★ {movie.vote_average.toFixed(1)}</span>
+                          <span className="text-gray-300 ml-1">★ {movie.vote_average.toFixed(1)}</span>
                         )}
                       </div>
-                      <p className="text-sm text-gray-400 line-clamp-3 leading-relaxed">{movie.overview}</p>
+                      
+                      <p className="text-[13px] text-gray-400 line-clamp-3 leading-snug mt-1">
+                        {movie.overview}
+                      </p>
                     </div>
                   </div>
                 </motion.div>
