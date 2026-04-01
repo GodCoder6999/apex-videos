@@ -1,127 +1,143 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { ChevronRight, ChevronLeft, Play, Plus } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import { motion, useInView } from 'framer-motion';
-import YouTube from 'react-youtube';
-import movieTrailer from 'movie-trailer';
+// src/components/Row.jsx
+import React, { useState, useEffect, useRef } from 'react'
+import { ChevronRight, Play, Plus } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { motion, useInView } from 'framer-motion'
 
-const BASE_URL = 'https://api.themoviedb.org/3';
-const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/original';
+const BASE_URL       = 'https://api.themoviedb.org/3'
+const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/original'
 
-export default function Row({ title, fetchUrl, isLargeRow = false }) {
-  const [movies, setMovies] = useState([]);
-  const [hoveredMovie, setHoveredMovie] = useState(null);
-  const [trailerUrl, setTrailerUrl] = useState('');
-  const navigate = useNavigate();
+// Card stagger: each card appears 0.2s after the previous
+const cardVariants = {
+  hidden:  { opacity: 0, y: 30, scale: 0.95 },
+  visible: i => ({
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: {
+      delay: i * 0.2,          // 0.2s stagger per card
+      duration: 0.45,
+      ease: [0.22, 1, 0.36, 1],
+    },
+  }),
+}
 
-  const ref = useRef(null);
-  const rowRef = useRef(null);
-  const inView = useInView(ref, { once: true, margin: '-80px' });
+const rowTitle = {
+  hidden:  { opacity: 0, x: -20 },
+  visible: { opacity: 1, x: 0, transition: { duration: 0.5, ease: 'easeOut' } },
+}
+
+const Row = ({ title, fetchUrl, isLargeRow = false }) => {
+  const [movies, setMovies] = useState([])
+  const navigate = useNavigate()
+
+  // Only animate cards when the row scrolls into view
+  const ref     = useRef(null)
+  const inView  = useInView(ref, { once: true, margin: '-80px' })
 
   useEffect(() => {
     fetch(`${BASE_URL}${fetchUrl}`)
-      .then((r) => r.json())
-      .then((d) => setMovies(d.results || []));
-  }, [fetchUrl]);
-
-  // Handle Trailer Fetch on Hover
-  useEffect(() => {
-    if (hoveredMovie) {
-      const movieTitle = hoveredMovie.title || hoveredMovie.name || hoveredMovie.original_name;
-      movieTrailer(movieTitle, { id: true })
-        .then((url) => setTrailerUrl(url))
-        .catch(() => setTrailerUrl('')); // Fallback if no trailer is found
-    } else {
-      setTrailerUrl('');
-    }
-  }, [hoveredMovie]);
-
-  const handleScroll = (direction) => {
-    if (rowRef.current) {
-      const { scrollLeft, clientWidth } = rowRef.current;
-      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth : scrollLeft + clientWidth;
-      rowRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
-    }
-  };
-
-  const opts = {
-    height: '100%',
-    width: '100%',
-    playerVars: { autoplay: 1, mute: 1, controls: 0, modestbranding: 1 },
-  };
+      .then(r => r.json())
+      .then(d => setMovies(d.results || []))
+  }, [fetchUrl])
 
   return (
-    <div ref={ref} className="pl-4 md:pl-10 mt-6 md:mt-8 relative group">
-      <h2 className="text-xl md:text-2xl font-bold text-gray-100 mb-2">{title}</h2>
-
-      {/* Slide Arrows */}
-      <div 
-        className="absolute top-1/2 left-0 z-40 hidden group-hover:flex items-center justify-center h-full w-12 -translate-y-1/2 bg-black/50 cursor-pointer hover:bg-black/80 transition-colors" 
-        onClick={() => handleScroll('left')}
+    <div ref={ref} className="pl-4 md:pl-10 mt-6 md:mt-8 relative">
+      {/* Row title */}
+      <motion.div
+        variants={rowTitle}
+        initial="hidden"
+        animate={inView ? 'visible' : 'hidden'}
+        className="flex items-center gap-2 mb-2 group cursor-pointer w-max"
       >
-        <ChevronLeft className="w-8 h-8 text-white" />
-      </div>
-      <div 
-        className="absolute top-1/2 right-0 z-40 hidden group-hover:flex items-center justify-center h-full w-12 -translate-y-1/2 bg-black/50 cursor-pointer hover:bg-black/80 transition-colors" 
-        onClick={() => handleScroll('right')}
-      >
-        <ChevronRight className="w-8 h-8 text-white" />
-      </div>
+        <h2 className="text-xl md:text-2xl font-bold text-gray-100 group-hover:text-primeBlue transition-colors">
+          {title}
+        </h2>
+        <motion.div
+          animate={inView ? { x: 0, opacity: 1 } : { x: -8, opacity: 0 }}
+          transition={{ delay: 0.3, duration: 0.3 }}
+        >
+          <ChevronRight className="w-5 h-5 text-transparent group-hover:text-primeBlue transition-colors" />
+        </motion.div>
+      </motion.div>
 
-      {/* Row Container */}
-      <div ref={rowRef} className="movie-row flex gap-4 overflow-x-auto scrollbar-hide scroll-smooth py-5">
-        {movies.map((movie) => {
-          if (!movie.poster_path || !movie.backdrop_path) return null;
-          const type = movie.media_type || (movie.first_air_date ? 'tv' : 'movie');
+      <div className="movie-row">
+        {movies.map((movie, i) => {
+          if (!movie.poster_path || !movie.backdrop_path) return null
+          const type = movie.media_type || (movie.first_air_date ? 'tv' : 'movie')
 
           return (
             <motion.div
               key={movie.id}
-              className={`movie-card relative flex-shrink-0 cursor-pointer transition-transform duration-300 hover:z-50 ${isLargeRow ? 'w-[170px] md:w-[210px]' : 'w-[220px] md:w-[300px]'}`}
-              onMouseEnter={() => setHoveredMovie(movie)}
-              onMouseLeave={() => setHoveredMovie(null)}
+              custom={i}
+              variants={cardVariants}
+              initial="hidden"
+              animate={inView ? 'visible' : 'hidden'}
+              className={`movie-card ${isLargeRow ? 'w-[170px] md:w-[210px] h-[250px] md:h-[320px]' : 'w-[220px] md:w-[300px] h-[125px] md:h-[170px]'}`}
             >
               <img
                 onClick={() => navigate(`/detail/${type}/${movie.id}`, { state: { movie } })}
-                className="w-full h-full object-cover rounded"
+                className="thumbnail w-full h-full object-cover transition-opacity duration-300 rounded"
                 src={`${IMAGE_BASE_URL}${isLargeRow ? movie.poster_path : movie.backdrop_path}`}
                 alt={movie.name || movie.title}
+                loading="lazy"
               />
 
-              {/* Hover Popup Container */}
-              <div className="hover-popup absolute top-[-20px] left-[-40px] w-[320px] md:w-[380px] bg-[#1a242f] rounded-xl shadow-2xl opacity-0 invisible scale-75 transition-all duration-300 origin-bottom z-[100000] overflow-hidden pointer-events-none group-hover:pointer-events-auto">
-                <div 
-                  className="relative w-full h-[180px] bg-black cursor-pointer" 
+              <div className="hover-popup">
+                <div
+                  className="relative w-full h-[140px] md:h-[180px] overflow-hidden bg-black cursor-pointer"
                   onClick={() => navigate(`/detail/${type}/${movie.id}`, { state: { movie } })}
                 >
-                  {trailerUrl && hoveredMovie?.id === movie.id ? (
-                     <YouTube videoId={trailerUrl} opts={opts} className="absolute inset-0 w-full h-full pointer-events-none" />
-                  ) : (
-                    <img className="w-full h-full object-cover" src={`${IMAGE_BASE_URL}${movie.backdrop_path}`} alt={movie.name || movie.title} />
-                  )}
+                  <img
+                    className="w-full h-full object-cover"
+                    src={`${IMAGE_BASE_URL}${movie.backdrop_path}`}
+                    alt={movie.name || movie.title}
+                  />
+                  <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-primeHover to-transparent" />
+                  <div className="absolute bottom-3 right-3 flex items-center gap-1.5 text-[11px] text-white font-bold z-10 drop-shadow-md">
+                    <span className="w-5 h-5 rounded-full border-[1.5px] border-white flex items-center justify-center text-[8px]">▶</span>
+                    Apex Player
+                  </div>
                 </div>
-                <div className="p-4">
-                  <h3 className="text-xl font-bold text-white mb-3 truncate">{movie.title || movie.name}</h3>
-                  <div className="flex gap-3 mb-3">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); navigate(`/play/${type}/${movie.id}`); }} 
-                      className="flex-1 flex justify-center items-center gap-2 bg-white text-black py-2 rounded font-bold hover:bg-gray-200 transition-colors"
+
+                <div className="p-4 bg-primeHover">
+                  <h3
+                    onClick={() => navigate(`/detail/${type}/${movie.id}`, { state: { movie } })}
+                    className="text-lg md:text-xl font-bold text-white mb-3 leading-tight truncate cursor-pointer hover:underline"
+                  >
+                    {movie.title || movie.name}
+                  </h3>
+
+                  <div className="flex items-center gap-3 mb-4">
+                    <motion.button
+                      whileTap={{ scale: 0.95 }}
+                      onClick={e => { e.stopPropagation(); navigate(`/play/${type}/${movie.id}`) }}
+                      className="flex-1 flex items-center justify-center gap-2 bg-white text-black py-2.5 rounded font-bold hover:bg-gray-200 transition-colors"
                     >
-                      <Play className="w-4 h-4" fill="currentColor" /> Play
-                    </button>
-                    <button className="w-10 h-10 rounded-full border border-gray-500 text-white flex items-center justify-center hover:border-white transition-colors">
+                      <Play fill="currentColor" className="w-4 h-4" /> Play
+                    </motion.button>
+                    <motion.button
+                      whileTap={{ scale: 0.9 }}
+                      className="w-11 h-11 rounded-full border-2 border-gray-500 flex items-center justify-center text-white hover:border-white transition-colors bg-white/5"
+                    >
                       <Plus className="w-5 h-5" />
-                    </button>
+                    </motion.button>
                   </div>
-                  <div className="text-xs text-gray-400 font-semibold mt-2">
-                    {movie.release_date ? movie.release_date.substring(0, 4) : ''} • {movie.vote_average?.toFixed(1)} Rating
+
+                  <div className="flex items-center gap-3 text-xs text-gray-400 mb-3 font-semibold">
+                    <span className="border border-gray-500 px-1.5 py-0.5 rounded text-gray-300">U/A 16+</span>
+                    <span>{movie.release_date?.substring(0,4) || movie.first_air_date?.substring(0,4)}</span>
+                    <span className="text-primeBlue text-[13px]">Apex</span>
                   </div>
+                  <p className="text-xs text-gray-400 line-clamp-3 leading-relaxed">{movie.overview}</p>
                 </div>
               </div>
             </motion.div>
-          );
+          )
         })}
       </div>
     </div>
-  );
+  )
 }
+
+export default Row
