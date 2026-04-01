@@ -80,7 +80,7 @@ function ScrollArrow({ dir, onClick, visible }) {
           }}
           className={`
             pointer-events-auto
-            w-10 h-10 md:w-12 md:h-12 rounded-full
+            w-10 h-10 md:w-14 md:h-14 rounded-full
             bg-black/60 border border-white/20
             flex items-center justify-center
             text-white backdrop-blur-md
@@ -92,8 +92,8 @@ function ScrollArrow({ dir, onClick, visible }) {
           style={{ willChange: 'transform, opacity' }}
         >
           {dir === 'left'
-            ? <ChevronLeft  className="w-5 h-5 md:w-6 md:h-6" />
-            : <ChevronRight className="w-5 h-5 md:w-6 md:h-6" />
+            ? <ChevronLeft  className="w-6 h-6 md:w-8 md:h-8" />
+            : <ChevronRight className="w-6 h-6 md:w-8 md:h-8" />
           }
         </motion.button>
       )}
@@ -180,7 +180,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
               exit={{ opacity: 0, scale: 0.85, x: 8 }}
               transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
               onClick={() => setGlobalMuted(m => !m)}
-              className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-400 hover:text-white transition-colors duration-150 px-2.5 py-1 rounded-full border border-white/10 hover:border-white/30 bg-black/30 backdrop-blur-sm"
+              className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-400 hover:text-white transition-colors duration-150 px-2.5 py-1 rounded-full border border-white/10 hover:border-white/30 bg-black/30 backdrop-blur-sm z-[60000]"
             >
               {globalMuted
                 ? <><VolumeX className="w-3.5 h-3.5" /> Unmute</>
@@ -193,10 +193,9 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
 
       <div className="relative">
         
-        {/* CHANGED: z-[50000] completely overrides the 10000 z-index of the .hover-popup in index.css */}
-        <div className={`absolute left-0 right-0 top-[20px] pointer-events-none flex items-center justify-between z-[50000] ${isLargeRow ? 'h-[240px] md:h-[300px]' : 'h-[118px] md:h-[158px]'}`}>
+        {/* Adjusted absolute wrapper height to exactly match the new card sizes */}
+        <div className={`absolute left-0 right-0 top-[20px] pointer-events-none flex items-center justify-between z-[50000] ${isLargeRow ? 'h-[584px]' : 'h-[158px]'}`}>
           
-          {/* Left edge fade */}
           <AnimatePresence>
             {canScrollL && (
               <motion.div
@@ -206,7 +205,6 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
             )}
           </AnimatePresence>
 
-          {/* Right edge fade */}
           <AnimatePresence>
             {canScrollR && (
               <motion.div
@@ -216,7 +214,6 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
             )}
           </AnimatePresence>
 
-          {/* Scrolling Arrows */}
           <div className="absolute left-2 md:left-4 z-[50000]">
             <ScrollArrow dir="left" onClick={() => scroll('left')} visible={canScrollL && isRowHovered} />
           </div>
@@ -245,7 +242,8 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                   variants={cardVariants}
                   initial="hidden"
                   animate={inView ? 'visible' : 'hidden'}
-                  className={`movie-card ${isLargeRow ? 'w-[160px] md:w-[200px] h-[240px] md:h-[300px]' : 'w-[210px] md:w-[280px] h-[118px] md:h-[158px]'}`}
+                  /* EXPLICIT CARD SIZES APPLIED HERE */
+                  className={`movie-card ${isLargeRow ? 'w-[368px] h-[584px]' : 'w-[280px] h-[158px]'}`}
                   onMouseEnter={() => setHoveredId(movie.id)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
@@ -259,10 +257,12 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                     transition={{ duration: 0.3 }}
                   />
 
-                  {/* Hover popup */}
-                  <div className="hover-popup">
+                  {/* Hover popup linking to our CSS classes for explicit bounds */}
+                  <div className={`hover-popup ${isLargeRow ? 'large-popup' : 'normal-popup'}`}>
+                    
+                    {/* Preview area -> scaled up to occupy the massive new popup bounds nicely */}
                     <div
-                      className="relative w-full h-[138px] md:h-[175px] overflow-hidden bg-black cursor-pointer"
+                      className={`relative w-full overflow-hidden bg-black cursor-pointer ${isLargeRow ? 'h-[75%]' : 'h-[335px]'}`}
                       onClick={() => navigate(`/detail/${mtype}/${movie.id}`, { state: { movie } })}
                     >
                       <img
@@ -273,10 +273,10 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
 
                       {isHov && <TrailerEmbed movieId={movie.id} type={mtype} muted={globalMuted} />}
 
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#1a242f] via-transparent to-transparent z-20" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#1a242f] via-black/20 to-transparent z-20" />
 
-                      <div className="absolute bottom-2.5 right-3 flex items-center gap-1.5 text-[10px] text-white/90 font-bold z-30">
-                        <span className="w-4 h-4 rounded-full border border-white/70 flex items-center justify-center text-[7px]">▶</span>
+                      <div className="absolute bottom-4 right-4 flex items-center gap-1.5 text-xs text-white/90 font-bold z-30">
+                        <span className="w-5 h-5 rounded-full border border-white/70 flex items-center justify-center text-[9px]">▶</span>
                         Apex Player
                       </div>
 
@@ -287,45 +287,46 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                           exit={{ opacity: 0, scale: 0.7 }}
                           transition={{ duration: 0.2, delay: 0.3 }}
                           onClick={e => { e.stopPropagation(); setGlobalMuted(m => !m) }}
-                          className="absolute bottom-2.5 left-3 z-30 w-6 h-6 rounded-full bg-black/60 border border-white/30 flex items-center justify-center text-white hover:bg-white hover:text-black transition-colors duration-150"
+                          className="absolute bottom-4 left-4 z-30 w-8 h-8 rounded-full bg-black/60 border border-white/30 flex items-center justify-center text-white hover:bg-white hover:text-black transition-colors duration-150"
                         >
                           {globalMuted
-                            ? <VolumeX className="w-3 h-3" />
-                            : <Volume2 className="w-3 h-3 text-primeBlue" />
+                            ? <VolumeX className="w-4 h-4" />
+                            : <Volume2 className="w-4 h-4 text-primeBlue" />
                           }
                         </motion.button>
                       )}
                     </div>
 
-                    <div className="p-3.5 bg-[#1a242f]">
+                    {/* Info section (takes up remaining space in the Flex column popup) */}
+                    <div className="flex-1 p-5 bg-[#1a242f] flex flex-col justify-center">
                       <h3
                         onClick={() => navigate(`/detail/${mtype}/${movie.id}`, { state: { movie } })}
-                        className="text-[15px] md:text-[17px] font-bold text-white mb-2.5 leading-tight truncate cursor-pointer hover:underline"
+                        className="text-xl font-bold text-white mb-3 leading-tight truncate cursor-pointer hover:underline"
                       >
                         {movie.title || movie.name}
                       </h3>
 
-                      <div className="flex items-center gap-2.5 mb-3">
+                      <div className="flex items-center gap-3 mb-4">
                         <motion.button
                           whileHover={{ scale: 1.03 }}
                           whileTap={{ scale: 0.96 }}
                           transition={{ type: 'spring', stiffness: 400, damping: 25 }}
                           onClick={e => { e.stopPropagation(); navigate(`/play/${mtype}/${movie.id}`) }}
-                          className="flex-1 flex items-center justify-center gap-1.5 bg-white text-black py-2 rounded-md font-bold text-sm hover:bg-gray-100 transition-colors duration-150"
+                          className="flex-1 flex items-center justify-center gap-2 bg-white text-black py-2.5 rounded-md font-bold text-sm hover:bg-gray-100 transition-colors duration-150"
                         >
-                          <Play fill="currentColor" className="w-3.5 h-3.5" /> Play
+                          <Play fill="currentColor" className="w-4 h-4" /> Play
                         </motion.button>
                         <motion.button
                           whileHover={{ scale: 1.08 }}
                           whileTap={{ scale: 0.92 }}
                           transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                          className="w-9 h-9 rounded-full border-2 border-gray-500 flex items-center justify-center text-white hover:border-white transition-colors duration-150 bg-white/5"
+                          className="w-10 h-10 rounded-full border-2 border-gray-500 flex items-center justify-center text-white hover:border-white transition-colors duration-150 bg-white/5"
                         >
-                          <Plus className="w-4 h-4" />
+                          <Plus className="w-5 h-5" />
                         </motion.button>
                       </div>
 
-                      <div className="flex items-center gap-2 text-[11px] text-gray-400 mb-2 font-semibold">
+                      <div className="flex items-center gap-2.5 text-xs text-gray-400 mb-3 font-semibold">
                         <span className="border border-gray-600 px-1.5 py-0.5 rounded text-gray-300">U/A 16+</span>
                         <span>{movie.release_date?.substring(0,4) || movie.first_air_date?.substring(0,4)}</span>
                         <span className="text-primeBlue">Apex</span>
@@ -333,7 +334,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                           <span className="text-yellow-500 font-bold ml-auto">★ {movie.vote_average.toFixed(1)}</span>
                         )}
                       </div>
-                      <p className="text-[11px] text-gray-400 line-clamp-2 leading-relaxed">{movie.overview}</p>
+                      <p className="text-sm text-gray-400 line-clamp-3 leading-relaxed">{movie.overview}</p>
                     </div>
                   </div>
                 </motion.div>
