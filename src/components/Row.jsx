@@ -9,14 +9,6 @@ const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/original'
 const API_KEY        = import.meta.env.VITE_TMDB_API_KEY
 
 // ── Variants ──────────────────────────────────────────────────────────────────
-const cardVariants = {
-  hidden:  { opacity: 0, y: 24, scale: 0.94 },
-  visible: i => ({
-    opacity: 1, y: 0, scale: 1,
-    transition: { delay: i * 0.06, duration: 0.5, ease: [0.22, 1, 0.36, 1] },
-  }),
-}
-
 const rowTitleVariants = {
   hidden:  { opacity: 0, x: -16 },
   visible: { opacity: 1, x: 0, transition: { duration: 0.45, ease: 'easeOut' } },
@@ -105,6 +97,7 @@ function ScrollArrow({ dir, onClick, visible }) {
 const Row = ({ title, fetchUrl, isLargeRow = false }) => {
   const [movies,      setMovies]      = useState([])
   const [hoveredId,   setHoveredId]   = useState(null)
+  const [hoveredIndex,setHoveredIndex]= useState(null)
   const [globalMuted, setGlobalMuted] = useState(true)
   const [canScrollL,  setCanScrollL]  = useState(false)
   const [canScrollR,  setCanScrollR]  = useState(true)
@@ -229,16 +222,55 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
               const isHov    = hoveredId === movie.id
               const imgSrc   = `${IMAGE_BASE_URL}${isLargeRow ? (movie.poster_path || movie.backdrop_path) : movie.backdrop_path}`
 
+              // ── Dynamic Translation Math ────────────────────────────
+              const getCardXOffset = (index) => {
+                if (hoveredIndex === null || hoveredIndex === index) return 0;
+                
+                const isHoveredFirst = hoveredIndex === 0;
+                const isHoveredLast = hoveredIndex === movies.length - 1;
+
+                if (isLargeRow) {
+                  const shift = 721 - 274; // Based on css: 721px - 274px = 447px difference
+                  if (isHoveredLast) {
+                    return index < hoveredIndex ? -shift : 0; // Last item expands left
+                  } else {
+                    return index > hoveredIndex ? shift : 0;  // Everything else expands right
+                  }
+                } else {
+                  const shift = 422 - 280; // Based on css: 422px - 280px = 142px difference
+                  if (isHoveredFirst) {
+                    return index > hoveredIndex ? shift : 0;
+                  } else if (isHoveredLast) {
+                    return index < hoveredIndex ? -shift : 0;
+                  } else {
+                    // Normal rows pop out symmetrically
+                    return index < hoveredIndex ? -(shift / 2) : (shift / 2);
+                  }
+                }
+              };
+
+              // Map durations & curves to match index.css flawlessly
+              const shiftDuration = isLargeRow ? 0.35 : 0.26;
+              const shiftEase = isLargeRow ? [0.22, 1, 0.36, 1] : [0.34, 1.56, 0.64, 1];
+
               return (
                 <motion.div
                   key={movie.id}
-                  custom={i}
-                  variants={cardVariants}
-                  initial="hidden"
-                  animate={inView ? 'visible' : 'hidden'}
                   className={`movie-card ${isLargeRow ? 'w-[274px] h-[407px]' : 'w-[280px] h-[158px]'}`}
-                  onMouseEnter={() => setHoveredId(movie.id)}
-                  onMouseLeave={() => setHoveredId(null)}
+                  onMouseEnter={() => { setHoveredId(movie.id); setHoveredIndex(i); }}
+                  onMouseLeave={() => { setHoveredId(null); setHoveredIndex(null); }}
+                  initial={{ opacity: 0, y: 24, scale: 0.94, x: 0 }}
+                  animate={
+                    inView 
+                      ? { opacity: 1, y: 0, scale: 1, x: getCardXOffset(i) } 
+                      : { opacity: 0, y: 24, scale: 0.94, x: 0 }
+                  }
+                  transition={{
+                    opacity: { delay: inView && hoveredIndex === null ? i * 0.06 : 0, duration: 0.5 },
+                    y: { delay: inView && hoveredIndex === null ? i * 0.06 : 0, duration: 0.5, ease: [0.22, 1, 0.36, 1] },
+                    scale: { delay: inView && hoveredIndex === null ? i * 0.06 : 0, duration: 0.5, ease: [0.22, 1, 0.36, 1] },
+                    x: { duration: shiftDuration, ease: shiftEase }
+                  }}
                 >
                   <motion.img
                     onClick={() => navigate(`/detail/${mtype}/${movie.id}`, { state: { movie } })}
