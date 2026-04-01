@@ -1,4 +1,21 @@
+// api/proxy.js
+// ─────────────────────────────────────────────────────────────────────────────
+// Universal CORS proxy for streaming media.
+// Handles: .m3u8 manifests (rewrites all segment URLs), .ts segments,
+//          JSON API responses, and passthrough for direct video files.
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default async function handler(req, res) {
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', '*')
+    res.status(200).end()
+    return
+  }
+
+  // Extract target URL
   const raw = req.query?.url || new URL(req.url, 'http://x').searchParams.get('url')
   if (!raw) {
     res.status(400).end('missing url param')
@@ -6,6 +23,13 @@ export default async function handler(req, res) {
   }
 
   const target = decodeURIComponent(raw)
+
+  // Security: block obvious local/private addresses
+  if (/^https?:\/\/(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(target)) {
+    res.status(403).end('forbidden')
+    return
+  }
+
   const origin = target.match(/^(https?:\/\/[^/]+)/)?.[1] || 'https://vidsrc.me'
 
   let upstream
@@ -15,12 +39,17 @@ export default async function handler(req, res) {
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
           '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        Referer: origin + '/',
-        Origin: origin,
-        Accept: '*/*',
+        'Referer': origin + '/',
+        'Origin': origin,
+        'Accept': '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
         'Cache-Control': 'no-cache',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'cross-site',
       },
+      // Follow redirects
+      redirect: 'follow',
     })
   } catch (e) {
     res.status(502).end(`fetch error: ${e.message}`)
@@ -28,62 +57,121 @@ export default async function handler(req, res) {
   }
 
   if (!upstream.ok) {
-    res.status(upstream.status).end(`upstream ${upstream.status}`)
+    // Return error body for debugging JSON API calls
+    const errBody = await upstream.text().catch(() => '')
+    res.status(upstream.status).end(
+      errBody || `upstream ${upstream.status} ${upstream.statusText}`
+    )
     return
   }
 
   const ct = upstream.headers.get('content-type') || ''
 
+  // Set CORS headers on all responses
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', '*')
   res.setHeader('Cache-Control', 'no-store')
 
-  const isM3u8 = ct.includes('mpegurl') || ct.includes('x-mpegURL') || target.includes('.m3u8')
+  // Detect content type
+  const isM3u8 =
+    ct.includes('mpegurl') ||
+    ct.includes('x-mpegURL') ||
+    ct.includes('application/vnd.apple.mpegurl') ||
+    target.includes('.m3u8') ||
+    decodeURIComponent(target).includes('.m3u8')
 
+  const isJson =
+    ct.includes('application/json') ||
+    ct.includes('text/plain') ||
+    ct.includes('text/json')
+
+  const isTs =
+    ct.includes('video/mp2t') ||
+    ct.includes('video/MP2T') ||
+    target.includes('.ts') ||
+    target.match(/\.(ts|aac|vtt|srt)(\?|$)/i)
+
+  // ── M3U8 manifest: rewrite all segment/key URLs ───────────────────────────
   if (isM3u8) {
     const text = await upstream.text()
     const base = target.substring(0, target.lastIndexOf('/') + 1)
-    
-    // FIX: Safely rewrite the manifest without destroying HLS tags
-    const rewritten = text
-      .split('\n')
-      .map(line => {
-        const trimmed = line.trim()
-        if (!trimmed) return line
-        
-        // If it's a tag line (starts with #)
-        if (trimmed.startsWith('#')) {
-          // Replace ONLY the value inside the URI="" quotes, keep the rest of the line intact
-          return line.replace(/URI="([^"]+)"/g, (match, uri) => {
-            const abs = toAbsolute(uri, base)
-            return `URI="/api/proxy?url=${encodeURIComponent(abs)}"`
-          })
-        }
-        
-        // If it's a raw URL line (video segment)
-        const abs = toAbsolute(trimmed, base)
-        return `/api/proxy?url=${encodeURIComponent(abs)}`
-      })
-      .join('\n')
+    const rewritten = rewriteManifest(text, base)
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl')
     res.status(200).end(rewritten)
-  } else {
-    // Note: Do not send MP4/MKV files through this proxy to avoid Vercel memory crashes.
-    // The strict filtering in Player.jsx ensures only .m3u8 and .ts files arrive here.
-    const buf = Buffer.from(await upstream.arrayBuffer())
-    res.setHeader('Content-Type', ct || 'video/mp2t')
-    res.status(200).end(buf)
+    return
   }
+
+  // ── JSON / API responses: pass through as-is ─────────────────────────────
+  if (isJson || ct.includes('text/')) {
+    const text = await upstream.text()
+    res.setHeader('Content-Type', ct || 'application/json')
+    res.status(200).end(text)
+    return
+  }
+
+  // ── Binary: TS segments, VTT subtitles, MP4 chunks ───────────────────────
+  // Note: Large MP4 files are streamed directly without going through proxy
+  // to avoid Vercel memory limits. Only small chunks & TS segments come here.
+  const buf = Buffer.from(await upstream.arrayBuffer())
+  res.setHeader('Content-Type', ct || 'application/octet-stream')
+  // Forward Content-Length if present
+  const cl = upstream.headers.get('content-length')
+  if (cl) res.setHeader('Content-Length', cl)
+  res.status(200).end(buf)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rewrite M3U8 manifest: replace all segment/key URLs with proxy URLs
+// ─────────────────────────────────────────────────────────────────────────────
+function rewriteManifest(text, base) {
+  return text
+    .split('\n')
+    .map(line => {
+      const trimmed = line.trim()
+      if (!trimmed) return line
+
+      if (trimmed.startsWith('#')) {
+        // Rewrite URI="" attributes inside HLS tags (keys, maps, media playlists)
+        return line.replace(/URI="([^"]+)"/g, (match, uri) => {
+          const abs = toAbsolute(uri, base)
+          return `URI="/api/proxy?url=${encodeURIComponent(abs)}"`
+        })
+      }
+
+      // Skip comment-like lines
+      if (trimmed.startsWith('//') || trimmed.startsWith('/*')) return line
+
+      // Raw URL lines (segment references, sub-playlists)
+      // Only rewrite if it looks like a URL (http or relative path)
+      if (
+        trimmed.startsWith('http') ||
+        trimmed.startsWith('/') ||
+        trimmed.includes('.ts') ||
+        trimmed.includes('.m3u8') ||
+        trimmed.includes('.aac') ||
+        trimmed.includes('.mp4') ||
+        trimmed.includes('.vtt') ||
+        // Match any path-like segment (no spaces, has a /)
+        (/^[^\s]+\/[^\s]+$/.test(trimmed) && !trimmed.startsWith('#'))
+      ) {
+        const abs = toAbsolute(trimmed, base)
+        return `/api/proxy?url=${encodeURIComponent(abs)}`
+      }
+
+      return line
+    })
+    .join('\n')
 }
 
 function toAbsolute(url, base) {
+  if (!url) return url
   if (url.startsWith('http')) return url
   if (url.startsWith('//')) return 'https:' + url
   if (url.startsWith('/')) {
-    const origin = base.match(/^(https?:\/\/[^/]+)/)?.[1] || ''
-    return origin + url
+    const originMatch = base.match(/^(https?:\/\/[^/]+)/)
+    return (originMatch?.[1] || '') + url
   }
   return base + url
 }
