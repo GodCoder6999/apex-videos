@@ -2,14 +2,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Universal CORS proxy for streaming media.
 // Handles: .m3u8 manifests (rewrites all segment URLs), .ts segments,
-//          JSON API responses, and passthrough for direct video files.
+//          JSON API responses, passthrough for direct video files,
+//          and POST requests (for MP4Hydra multipart/form-data).
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', '*')
     res.status(200).end()
     return
@@ -30,34 +31,59 @@ export default async function handler(req, res) {
     return
   }
 
-  const origin = target.match(/^(https?:\/\/[^/]+)/)?.[1] || 'https://vidsrc.me'
+  const origin = target.match(/^(https?:\/\/[^/]+)/)?.[1] || 'https://player.vidzee.wtf'
+
+  // ── Determine Referer based on target host ────────────────────────────────
+  let referer = origin + '/'
+  if (target.includes('vidzee.wtf')) {
+    referer = 'https://core.vidzee.wtf/'
+  } else if (target.includes('mp4hydra.org')) {
+    // Extract the referer from query if provided
+    const url = new URL(req.url, 'http://x')
+    referer = url.searchParams.get('referer') || 'https://mp4hydra.org/'
+  } else if (target.includes('vixsrc.to')) {
+    referer = 'https://vixsrc.to/'
+  }
+
+  // ── Build fetch options ───────────────────────────────────────────────────
+  const fetchHeaders = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+      '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Referer': referer,
+    'Origin': origin,
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Cache-Control': 'no-cache',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'cross-site',
+  }
+
+  const fetchOptions = {
+    method: req.method === 'POST' ? 'POST' : 'GET',
+    headers: fetchHeaders,
+    redirect: 'follow',
+  }
+
+  // Forward POST body (for MP4Hydra multipart requests)
+  if (req.method === 'POST' && req.body) {
+    fetchOptions.body = req.body
+    // Forward Content-Type if it's multipart
+    if (req.headers['content-type']) {
+      fetchHeaders['Content-Type'] = req.headers['content-type']
+    }
+  }
 
   let upstream
   try {
-    upstream = await fetch(target, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-          '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Referer': origin + '/',
-        'Origin': origin,
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Cache-Control': 'no-cache',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'cross-site',
-      },
-      // Follow redirects
-      redirect: 'follow',
-    })
+    upstream = await fetch(target, fetchOptions)
   } catch (e) {
     res.status(502).end(`fetch error: ${e.message}`)
     return
   }
 
   if (!upstream.ok) {
-    // Return error body for debugging JSON API calls
     const errBody = await upstream.text().catch(() => '')
     res.status(upstream.status).end(
       errBody || `upstream ${upstream.status} ${upstream.statusText}`
@@ -69,7 +95,7 @@ export default async function handler(req, res) {
 
   // Set CORS headers on all responses
   res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', '*')
   res.setHeader('Cache-Control', 'no-store')
 
@@ -83,14 +109,11 @@ export default async function handler(req, res) {
 
   const isJson =
     ct.includes('application/json') ||
-    ct.includes('text/plain') ||
     ct.includes('text/json')
 
-  const isTs =
-    ct.includes('video/mp2t') ||
-    ct.includes('video/MP2T') ||
-    target.includes('.ts') ||
-    target.match(/\.(ts|aac|vtt|srt)(\?|$)/i)
+  const isText =
+    ct.includes('text/plain') ||
+    ct.includes('text/html')
 
   // ── M3U8 manifest: rewrite all segment/key URLs ───────────────────────────
   if (isM3u8) {
@@ -103,8 +126,8 @@ export default async function handler(req, res) {
     return
   }
 
-  // ── JSON / API responses: pass through as-is ─────────────────────────────
-  if (isJson || ct.includes('text/')) {
+  // ── JSON / HTML responses: pass through as-is ─────────────────────────────
+  if (isJson || isText) {
     const text = await upstream.text()
     res.setHeader('Content-Type', ct || 'application/json')
     res.status(200).end(text)
@@ -112,11 +135,8 @@ export default async function handler(req, res) {
   }
 
   // ── Binary: TS segments, VTT subtitles, MP4 chunks ───────────────────────
-  // Note: Large MP4 files are streamed directly without going through proxy
-  // to avoid Vercel memory limits. Only small chunks & TS segments come here.
   const buf = Buffer.from(await upstream.arrayBuffer())
   res.setHeader('Content-Type', ct || 'application/octet-stream')
-  // Forward Content-Length if present
   const cl = upstream.headers.get('content-length')
   if (cl) res.setHeader('Content-Length', cl)
   res.status(200).end(buf)
@@ -144,7 +164,6 @@ function rewriteManifest(text, base) {
       if (trimmed.startsWith('//') || trimmed.startsWith('/*')) return line
 
       // Raw URL lines (segment references, sub-playlists)
-      // Only rewrite if it looks like a URL (http or relative path)
       if (
         trimmed.startsWith('http') ||
         trimmed.startsWith('/') ||
@@ -153,7 +172,6 @@ function rewriteManifest(text, base) {
         trimmed.includes('.aac') ||
         trimmed.includes('.mp4') ||
         trimmed.includes('.vtt') ||
-        // Match any path-like segment (no spaces, has a /)
         (/^[^\s]+\/[^\s]+$/.test(trimmed) && !trimmed.startsWith('#'))
       ) {
         const abs = toAbsolute(trimmed, base)
