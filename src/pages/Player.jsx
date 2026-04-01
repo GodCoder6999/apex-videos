@@ -5,11 +5,11 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, Play, Pause, Volume2, VolumeX,
   Maximize, Minimize, Settings, RefreshCw,
-  SkipBack, SkipForward, AlertCircle, Languages, Gauge,
-  Wifi, WifiOff,
+  SkipBack, SkipForward, AlertCircle, Languages, Gauge
 } from 'lucide-react'
 
-const API = (import.meta.env.VITE_STREAM_API || 'http://localhost:3001').replace(/\/+$/, '')
+const BASE_URL = 'https://api.themoviedb.org/3'
+const API_KEY  = import.meta.env.VITE_TMDB_API_KEY
 
 // ── Load hls.js from CDN ──────────────────────────────────────────────────────
 let _hlsProm = null
@@ -36,14 +36,11 @@ const fmt = s => {
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
 async function safeJsonFetch(url) {
-  const resp = await fetch(url, { signal: AbortSignal.timeout(70000) })
+  const resp = await fetch(url, { signal: AbortSignal.timeout(20000) })
+  if (!resp.ok) throw new Error(`Network response was not ok (${resp.status})`)
   const text = await resp.text()
   if (text.trimStart().startsWith('<')) {
-    throw new Error(
-      resp.status === 404
-        ? 'Backend not found (404). Check your Render deployment.'
-        : `Server returned HTML (${resp.status}). Server may be waking — retry in 30s.`
-    )
+    throw new Error('Server returned HTML. The stream API might be blocked or updating.')
   }
   return JSON.parse(text)
 }
@@ -54,11 +51,11 @@ const ease   = { duration: 0.35, ease: [0.22, 1, 0.36, 1] }
 
 // Load steps with timing hints
 const LOAD_STEPS = [
-  { msg: 'Connecting to stream servers…', delay: 0    },
-  { msg: 'Scanning available sources…',   delay: 5000 },
-  { msg: 'Extracting HLS stream…',        delay: 12000 },
-  { msg: 'Trying fallback sources…',      delay: 25000 },
-  { msg: 'Almost there…',                 delay: 45000 },
+  { msg: 'Connecting to Nuvio Streams…',  delay: 0    },
+  { msg: 'Fetching metadata…',            delay: 1500 },
+  { msg: 'Scanning available sources…',   delay: 3000 },
+  { msg: 'Extracting stream…',            delay: 6000 },
+  { msg: 'Almost there…',                 delay: 10000 },
 ]
 
 export default function Player() {
@@ -114,6 +111,14 @@ export default function Player() {
     setLoadProgress(0)
     stepTimers.current.forEach(clearTimeout)
     stepTimers.current = []
+    
+    // Clear old tracks
+    setAudioTracks([])
+    setActiveAudio(-1)
+    setQualities([])
+    setActiveQuality(-1)
+    setSubTracks([])
+    setActiveSub(-1)
 
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
     if (videoRef.current) videoRef.current.src = ''
@@ -127,19 +132,43 @@ export default function Player() {
       stepTimers.current.push(t)
     })
 
-    // Warm the server
-    fetch(`${API}/health`).catch(() => {})
-
-    let m3u8, source, referer
+    let m3u8, source
     try {
-      const qs = type === 'tv' ? `?s=${season}&e=${episode}` : ''
-      const json = await safeJsonFetch(`${API}/api/stream/${type}/${id}${qs}`)
+      // 1. Get IMDB ID (Nuvio relies heavily on IMDB Identifiers for accuracy)
+      let streamId = `tmdb:${id}`
+      try {
+         const tmdbUrl = `${BASE_URL}/${type}/${id}/external_ids?api_key=${API_KEY}`
+         const extRes = await fetch(tmdbUrl)
+         if (extRes.ok) {
+           const extData = await extRes.json()
+           if (extData.imdb_id) {
+               streamId = type === 'tv' ? `${extData.imdb_id}:${season}:${episode}` : extData.imdb_id
+           } else if (type === 'tv') {
+               streamId = `tmdb:${id}:${season}:${episode}`
+           }
+         }
+      } catch (e) {
+         if (type === 'tv') streamId = `tmdb:${id}:${season}:${episode}`
+         console.warn("Failed to fetch IMDB ID, falling back to TMDB ID", e)
+      }
+
+      // 2. Fetch Streams directly from Nuvio API
+      const nuvioUrl = `https://nuviostreams.hayd.uk/stream/${type}/${streamId}.json`
+      const json = await safeJsonFetch(nuvioUrl)
       stepTimers.current.forEach(clearTimeout)
 
-      if (!json.ok) throw new Error(json.error || 'No streams found for this title.')
-      m3u8    = json.m3u8
-      source  = json.source
-      referer = json.referer
+      if (!json || !json.streams || !json.streams.length) {
+         throw new Error('No streams found on Nuvio for this title.')
+      }
+
+      // 3. Find the first playable valid stream
+      const stream = json.streams.find(s => s.url)
+      if (!stream) throw new Error('No playable stream URL found.')
+
+      m3u8 = stream.url
+      // Map Nuvio's provider name/metadata
+      source = stream.name ? `${stream.name} - ${stream.title?.split('\n')[0] || 'Auto'}` : 'Nuvio Streams'
+
     } catch (e) {
       stepTimers.current.forEach(clearTimeout)
       setLoadState('error')
@@ -151,19 +180,22 @@ export default function Player() {
     setLoadProgress(90)
     setLoadStep('Initializing player…')
 
-    const proxied = m3u8.startsWith('http') ? m3u8 : `${API}${m3u8}`
-    const Hls     = await loadHls()
-    const video   = videoRef.current
+    const Hls   = await loadHls()
+    const video = videoRef.current
     if (!video) return
 
-    if (!Hls || !Hls.isSupported()) {
-      video.src = proxied
+    const isM3U8 = m3u8.includes('.m3u8')
+
+    // If it's an MP4/MKV fallback or if HLS isn't supported on device
+    if (!isM3U8 || !Hls || !Hls.isSupported()) {
+      video.src = m3u8
       video.play().catch(() => {})
       setLoadState('playing')
       setLoadProgress(100)
       return
     }
 
+    // Connect to HLS
     const hls = new Hls({
       enableWorker: true,
       xhrSetup: xhr => { xhr.withCredentials = false },
@@ -172,12 +204,12 @@ export default function Player() {
       fragLoadingMaxRetry: 6,
       fragLoadingTimeOut: 30000,
       manifestLoadingTimeOut: 30000,
-      // Progressive loading
       startLevel: -1,
       abrEwmaDefaultEstimate: 1000000,
     })
+    
     hlsRef.current = hls
-    hls.loadSource(proxied)
+    hls.loadSource(m3u8)
     hls.attachMedia(video)
 
     hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
@@ -192,6 +224,7 @@ export default function Player() {
         setAudioTracks(at.map((t, i) => ({ id: i, label: t.name || t.lang || `Track ${i+1}` })))
         setActiveAudio(hls.audioTrack)
       }
+      
       const st = hls.subtitleTracks || []
       setSubTracks([{ id: -1, label: 'Off' }, ...st.map((t, i) => ({ id: i, label: t.name || t.lang || `Sub ${i+1}` }))])
 
@@ -238,7 +271,20 @@ export default function Player() {
         setCurrent(v.currentTime)
         if (v.buffered.length) setBuffered(v.buffered.end(v.buffered.length - 1))
       },
-      loadedmetadata: () => setDuration(v.duration),
+      loadedmetadata: () => {
+        setDuration(v.duration)
+        // Fallback for native embedded audio tracks (MP4/MKV format) if HLS is not used
+        if (!hlsRef.current && v.audioTracks && v.audioTracks.length > 0) {
+          const tracks = [];
+          for (let i = 0; i < v.audioTracks.length; i++) {
+            tracks.push({ id: i, label: v.audioTracks[i].label || v.audioTracks[i].language || `Track ${i+1}` });
+          }
+          setAudioTracks(tracks);
+          for (let i = 0; i < v.audioTracks.length; i++) {
+             if (v.audioTracks[i].enabled) { setActiveAudio(i); break; }
+          }
+        }
+      },
       durationchange: () => setDuration(v.duration),
       volumechange:   () => { setVolume(v.volume); setMuted(v.muted) },
     }
@@ -278,9 +324,21 @@ export default function Player() {
   const setVol     = val => { const v = videoRef.current; if (!v) return; v.volume = val; v.muted = val === 0 }
   const toggleFs   = () => document.fullscreenElement ? document.exitFullscreen() : containerRef.current?.requestFullscreen()
   const setSpeedFn = r => { if (videoRef.current) videoRef.current.playbackRate = r; setSpeed(r) }
-  const switchAudio= i => { if (hlsRef.current) hlsRef.current.audioTrack = i; setActiveAudio(i) }
   const switchQ    = i => { if (hlsRef.current) hlsRef.current.currentLevel = i; setActiveQuality(i) }
   const switchSub  = i => { if (hlsRef.current) { hlsRef.current.subtitleTrack = i; hlsRef.current.subtitleDisplay = i !== -1 }; setActiveSub(i) }
+
+  // Dual Switch Audio API (Supports HLS generated tracks & Native embedded browser tracks)
+  const switchAudio = i => { 
+    if (hlsRef.current) {
+      hlsRef.current.audioTrack = i; 
+      setActiveAudio(i);
+    } else if (videoRef.current && videoRef.current.audioTracks) {
+      for (let j = 0; j < videoRef.current.audioTracks.length; j++) {
+        videoRef.current.audioTracks[j].enabled = (j === i);
+      }
+      setActiveAudio(i);
+    }
+  }
 
   const seek = e => {
     const bar = seekRef.current; if (!bar || !duration) return
@@ -349,7 +407,7 @@ export default function Player() {
                 className="flex flex-col gap-1.5"
               >
                 <p className="text-white font-semibold text-sm tracking-wide">{loadStep}</p>
-                <p className="text-gray-600 text-xs">Trying multiple stream sources…</p>
+                <p className="text-gray-600 text-xs">Connecting securely to Nuvio…</p>
               </motion.div>
             </AnimatePresence>
 
@@ -637,7 +695,7 @@ export default function Player() {
                       {/* Panel content */}
                       <div className="max-h-56 overflow-y-auto py-1">
                         {panelTab === 'audio' && (audioTracks.length === 0
-                          ? <p className="text-gray-600 text-xs text-center py-8">No alternate audio</p>
+                          ? <p className="text-gray-600 text-xs text-center py-8">No alternate audio tracks available</p>
                           : audioTracks.map(t => (
                             <button key={t.id} onClick={() => switchAudio(t.id)}
                               className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-colors hover:bg-white/8 ${t.id === activeAudio ? 'text-[#00a8e1]' : 'text-gray-300'}`}>
@@ -647,7 +705,7 @@ export default function Player() {
                           ))
                         )}
                         {panelTab === 'quality' && (qualities.length === 0
-                          ? <p className="text-gray-600 text-xs text-center py-8">Loading qualities…</p>
+                          ? <p className="text-gray-600 text-xs text-center py-8">Quality options unavailable</p>
                           : qualities.map(q => (
                             <button key={q.id} onClick={() => switchQ(q.id)}
                               className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-colors hover:bg-white/8 ${q.id === activeQuality ? 'text-[#00a8e1]' : 'text-gray-300'}`}>
