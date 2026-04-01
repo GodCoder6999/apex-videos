@@ -269,7 +269,6 @@ export default function Player() {
       } catch (_) {}
 
       // 2. Fetch stream list from Nuvio 
-      // FIX: Stremio addons require 'series' instead of 'tv' in the API route!
       const stremioType = type === 'tv' ? 'series' : 'movie'
       const nuvioUrl = `https://nuviostreams.hayd.uk/stream/${stremioType}/${streamId}.json`
       const json = await safeJsonFetch(nuvioUrl)
@@ -280,8 +279,13 @@ export default function Player() {
       const stream = json.streams.find(s => s.url)
       if (!stream) throw new Error('No playable stream URL found.')
 
-      // Wrap the Nuvio URL through our local proxy
-      m3u8   = `/api/proxy?url=${encodeURIComponent(stream.url)}`
+      // 3. Conditional Proxying
+      // Only wrap .m3u8 files in the proxy. MP4/MKV files bypass it to avoid crashing Vercel memory.
+      const isHls = /\.m3u8/i.test(stream.url)
+      m3u8 = isHls 
+        ? `/api/proxy?url=${encodeURIComponent(stream.url)}` 
+        : stream.url
+        
       source = stream.name
         ? `${stream.name}${stream.title ? ' · ' + stream.title.split('\n')[0] : ''}`
         : 'Nuvio Streams'
@@ -301,7 +305,7 @@ export default function Player() {
     const video2 = videoRef.current
     if (!video2) return
 
-    // Ensure we handle HTTP direct formats accurately (not just `.m3u8` from URL)
+    // Ensure we handle HTTP direct formats accurately
     const isM3U8 = /\.m3u8/i.test(m3u8) || decodeURIComponent(m3u8).includes('.m3u8')
 
     // ── Native fallback (For direct MP4s / MKVs or Safari) ──────────────────
@@ -350,7 +354,7 @@ export default function Player() {
       setQualities(qs)
       setActiveQuality(-1)
 
-      // Audio tracks mapped properly with Nuvio
+      // Audio tracks mapped properly
       const at = hls.audioTracks || []
       if (at.length > 0) {
         const mapped = at.map(t => ({
