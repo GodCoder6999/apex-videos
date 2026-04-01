@@ -2,13 +2,12 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// This plugin perfectly mimics your Vercel /api/proxy function locally
+// ── Vite local dev proxy — mirrors the Vercel api/proxy function exactly ──────
 const vercelProxyPlugin = () => ({
   name: 'vercel-proxy',
   configureServer(server) {
     server.middlewares.use('/api/proxy', async (req, res, next) => {
       try {
-        // Construct full URL to easily extract query parameters
         const urlObj = new URL(req.url, `http://${req.headers.host}`)
         const target = urlObj.searchParams.get('url')
 
@@ -19,29 +18,51 @@ const vercelProxyPlugin = () => ({
         }
 
         const decoded = decodeURIComponent(target)
-        const origin = decoded.match(/^(https?:\/\/[^/]+)/)?.[1] || 'https://vidsrc.me'
+        const origin  = decoded.match(/^(https?:\/\/[^/]+)/)?.[1] || 'https://player.vidzee.wtf'
 
-        // Fetch the target stream
-        const up = await fetch(decoded, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124',
-            Referer: origin + '/',
-            Origin: origin,
-            Accept: '*/*',
-          },
-        })
+        // Choose Referer per host (VidZee needs core.vidzee.wtf)
+        let referer = origin + '/'
+        if (decoded.includes('vidzee.wtf'))   referer = 'https://core.vidzee.wtf/'
+        else if (decoded.includes('vixsrc.to')) referer = 'https://vixsrc.to/'
+        else if (decoded.includes('mp4hydra')) referer = urlObj.searchParams.get('referer') || 'https://mp4hydra.org/'
 
-        const ct = up.headers.get('content-type') || ''
+        const fetchHeaders = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124 Safari/537.36',
+          'Referer': referer,
+          'Origin': origin,
+          'Accept': '*/*',
+        }
+
+        const fetchOptions = {
+          method: req.method === 'POST' ? 'POST' : 'GET',
+          headers: fetchHeaders,
+          redirect: 'follow',
+        }
+
+        // Forward POST body
+        if (req.method === 'POST') {
+          const chunks = []
+          for await (const chunk of req) chunks.push(chunk)
+          fetchOptions.body = Buffer.concat(chunks)
+          if (req.headers['content-type']) {
+            fetchHeaders['Content-Type'] = req.headers['content-type']
+          }
+        }
+
+        const up = await fetch(decoded, fetchOptions)
+
+        const ct  = up.headers.get('content-type') || ''
         const isM = ct.includes('mpegurl') || decoded.includes('.m3u8')
 
         res.setHeader('Access-Control-Allow-Origin', '*')
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        res.setHeader('Access-Control-Allow-Headers', '*')
         res.setHeader('Content-Type', isM ? 'application/vnd.apple.mpegurl' : (ct || 'video/mp2t'))
 
         if (isM) {
           const text = await up.text()
           const base = decoded.substring(0, decoded.lastIndexOf('/') + 1)
-          const out = rewriteManifest(text, base)
-          res.end(out)
+          res.end(rewriteManifest(text, base))
         } else {
           const buf = Buffer.from(await up.arrayBuffer())
           res.end(buf)
@@ -58,19 +79,16 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    vercelProxyPlugin(), // Hook in the local proxy emulator
+    vercelProxyPlugin(),
   ],
 })
 
-// ---------------------------------------------------------------------------
-// Helper functions for rewriting the M3U8 manifest
-// ---------------------------------------------------------------------------
+// ── Manifest rewriter (identical to api/proxy.js) ─────────────────────────────
 function rewriteManifest(text, base) {
   return text.split('\n').map(line => {
     const t = line.trim()
     if (!t) return line
     if (t.startsWith('#')) {
-      // Safely replace URI="" attributes without destroying the tag
       return line.replace(/URI="([^"]+)"/g, (match, uri) => {
         const abs = toAbs(uri, base)
         return `URI="/api/proxy?url=${encodeURIComponent(abs)}"`
