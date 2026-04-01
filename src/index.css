@@ -12,36 +12,38 @@ body {
   overflow-x: hidden;
 }
 
-/* Hide scrollbar for the horizontal rows but keep functionality */
-.scrollbar-hide::-webkit-scrollbar {
-    display: none;
-}
-.scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-}
+/* Hide scrollbar */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
 /* ─── ROW SCROLL ARCHITECTURE ────────────────────────────────────────────────
-   The trick: the OUTER wrapper scrolls (overflow-x: scroll) but has
-   overflow-y: visible so popups can escape upward/downward.
-   The INNER track also stays overflow: visible.
-   The card z-index boost happens at the row level via isolation.
+   overflow-x:scroll + overflow-y:visible = cards scroll horizontally,
+   popups bleed vertically. Never set overflow:hidden on any ancestor.
+
+   The popup is ~450px tall. Wide cards are only ~170px tall, so the popup
+   extends ~280px below the card bottom. We need padding-bottom >= that,
+   then pull the next row back up with a negative margin-bottom so the
+   visual gap between rows stays normal.
    ────────────────────────────────────────────────────────────────────────── */
 
 .row-scroll-outer {
   overflow-x: scroll;
-  overflow-y: visible;   /* ← lets popups bleed out vertically */
+  overflow-y: visible;
   -ms-overflow-style: none;
   scrollbar-width: none;
-  /* padding gives vertical room for the popup to appear */
-  padding-top: 20px;
-  padding-bottom: 80px;
-  /* clip only horizontally at the row edges via margin trick */
   position: relative;
+  padding-top: 24px;
+  /* enough room for popup below wide cards */
+  padding-bottom: 340px;
+  margin-bottom: -300px;
 }
 
-.row-scroll-outer::-webkit-scrollbar {
-  display: none;
+.row-scroll-outer::-webkit-scrollbar { display: none; }
+
+/* Tall/portrait card rows need less bottom space */
+.row-scroll-outer.tall-row {
+  padding-bottom: 180px;
+  margin-bottom: -140px;
 }
 
 .movie-row {
@@ -49,11 +51,10 @@ body {
   gap: 16px;
   overflow: visible;
   flex-wrap: nowrap;
-  /* don't clip children */
   position: relative;
 }
 
-/* ─── CARD ─────────────────────────────────────────────────────────────────── */
+/* ─── CARD ──────────────────────────────────────────────────────────────────── */
 .movie-card {
   position: relative;
   flex-shrink: 0;
@@ -64,7 +65,7 @@ body {
 }
 
 .movie-card:hover {
-  z-index: 999;
+  z-index: 9999;
   transition: z-index 0s 0s;
 }
 
@@ -72,32 +73,31 @@ body {
   opacity: 0.3;
 }
 
-/* ─── POPUP ─────────────────────────────────────────────────────────────────
-   position: fixed would escape all containers but loses scroll sync.
-   position: absolute with a high z-index works because the card's
-   stacking context is raised and the outer scroll container has
-   overflow-y: visible.
+/* ─── POPUP ──────────────────────────────────────────────────────────────────
+   Anchored at top:-20px from card top.
+   The padding-bottom on .row-scroll-outer gives it room to grow downward.
    ────────────────────────────────────────────────────────────────────────── */
 .hover-popup {
   position: absolute;
   top: -20px;
   left: 50%;
-  transform: translateX(-50%) scale(0.85);
+  transform: translateX(-50%) scale(0.88);
   transform-origin: top center;
   width: 320px;
   background-color: var(--color-primeHover);
   border-radius: 12px;
-  z-index: 1000;
+  z-index: 10000;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transition:
-    opacity    0.28s cubic-bezier(0.25, 0.8, 0.25, 1),
-    transform  0.28s cubic-bezier(0.25, 0.8, 0.25, 1),
-    visibility 0s   0.28s;
-  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255,255,255,0.06);
+    opacity    0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
+    transform  0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
+    visibility 0s   0.25s;
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.97),
+    0 0 0 1px rgba(255, 255, 255, 0.07);
   overflow: hidden;
-  /* Ensure popup is never clipped by parent scroll */
   will-change: transform, opacity;
 }
 
@@ -111,20 +111,15 @@ body {
   visibility: visible;
   pointer-events: auto;
   transition:
-    opacity    0.28s cubic-bezier(0.25, 0.8, 0.25, 1),
-    transform  0.28s cubic-bezier(0.25, 0.8, 0.25, 1),
+    opacity    0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
+    transform  0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
     visibility 0s   0s;
 }
-
-/* ─── EDGE CARD CORRECTIONS ─────────────────────────────────────────────────
-   First card: align popup to the left edge of the card
-   Last card:  align popup to the right edge of the card
-   ────────────────────────────────────────────────────────────────────────── */
 
 /* First card — popup anchors left */
 .movie-card:first-child .hover-popup {
   left: 0;
-  transform: translateX(0) scale(0.85);
+  transform: translateX(0) scale(0.88);
   transform-origin: top left;
 }
 .movie-card:first-child:hover .hover-popup {
@@ -135,7 +130,7 @@ body {
 .movie-card:last-child .hover-popup {
   left: auto;
   right: 0;
-  transform: translateX(0) scale(0.85);
+  transform: translateX(0) scale(0.88);
   transform-origin: top right;
 }
 .movie-card:last-child:hover .hover-popup {
