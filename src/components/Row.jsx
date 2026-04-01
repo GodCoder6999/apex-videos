@@ -1,6 +1,6 @@
 // src/components/Row.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { ChevronRight, ChevronLeft, Play, Plus, Volume2, VolumeX, PlaySquare, ThumbsUp } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Play, Plus, Volume2, VolumeX } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { motion, useInView, AnimatePresence } from 'framer-motion'
 
@@ -8,7 +8,7 @@ const BASE_URL       = 'https://api.themoviedb.org/3'
 const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/original'
 const API_KEY        = import.meta.env.VITE_TMDB_API_KEY
 
-// ── Variants ──────────────────────────────────────────────────────────────────
+// ── variants for movie card animation ───────────────────────────────────────
 const cardVariants = {
   hidden:  { opacity: 0, y: 24, scale: 0.94 },
   visible: i => ({
@@ -17,217 +17,148 @@ const cardVariants = {
   }),
 }
 
+// ── variants for row title animation ────────────────────────────────────────
 const rowTitleVariants = {
   hidden:  { opacity: 0, x: -16 },
   visible: { opacity: 1, x: 0, transition: { duration: 0.45, ease: 'easeOut' } },
 }
 
-// ── Trailer embed (per-popup, respects global mute) ───────────────────────────
-function TrailerEmbed({ movieId, type = 'movie', muted }) {
+// ── Raw SVG definitions for Top 10 numbers (1-10) ───────────────────────────
+// Positioned and warped to match the original image design.
+const topTenNumbers = {
+  1: '<path d="M57.8 82.2l-1.3-3.6-11.2-30.8-.2-.3h-1.5L25.9 76l-1.6 3.8-1.5-.1h-9.9v2.5h20l-.2-.8-.2-2.1c-.2-1.1-.3-1.6-.3-2.1v-2.1c0-.9.2-2.3.6-3.8h2l30.1-2.1.2-.8-.1-2h12v2.1h1.7l1.3 3.6 11.2 30.8.2.3H90l17.7-28.2 1.6-3.8 1.5.1h9.9v-2.5h-20l.2.8.2 2.1c.2 1.1.3 1.6.3 2.1v2.1c0 .9-.2 2.3-.6 3.8h-2l-30.1 2.1-.2.8.1 2h-12z" fill="#000" stroke="#fff" stroke-width="4.5"/>',
+  2: '<path d="M57.6 15.6l-1.4 3.7c-5 13.8-11.1 30.7-18.4 50.8L37.1 72l-1.3 3.6h-.7c-4.6 12.6-9.1 25.1-13.6 37.4l-1 2.9-1.3 3.6h-9.6v2.5h16.2c0-.1 0-.3.1-.6s.3-1.2.5-2.6c.3-1.4.5-2.3.5-3.3v-3.3c0-1.4-.2-3.3-.6-5.8h1.2c8.2-22.6 16.4-45.2 24.6-67.8l.2-1h-.1c4.6-12.6 9.1-25.1 13.6-37.5L58 10.3l1.3-3.6h9.6v-2.5H62.7v.1z" fill="#000" stroke="#fff" stroke-width="4.5"/>',
+  3: '<path d="M78.6 30.8c-2.3 6.3-4.6 12.6-7 19l-1 2.8c-2.3 6.3-4.6 12.6-7 19.1-.1.2-.2.4-.2.6l-1 2.8h-11L51.8 77h-.7l3.6-9.9c2.3-6.3 4.6-12.6 7-19l1-2.8c2.3-6.3 4.6-12.6 7-19.1.1-.2.2-.4.2-.6l1-2.8H78.6v2z" fill="#000" stroke="#fff" stroke-width="4.5"/>',
+  4: '<path d="M78.6 18.2l-1 2.8c-2.3 6.3-4.6 12.6-7 19l-1 2.8c-2.3 6.3-4.6 12.6-7 19.1-.1.2-.2.4-.2.6l-1 2.8H51.8v2h-.7l3.6-9.9c2.3-6.3 4.6-12.6 7-19l1-2.8c2.3-6.3 4.6-12.6 7-19.1.1-.2.2-.4.2-.6l1-2.8H78.6v2z" fill="#000" stroke="#fff" stroke-width="4.5"/>',
+  5: '<path d="M106.3 22.8c-2.3 6.3-4.6 12.6-7 19l-1 2.8c-2.3 6.3-4.6 12.6-7 19.1-.1.2-.2.4-.2.6l-1 2.8H79.5v2h-.7l3.6-9.9c2.3-6.3 4.6-12.6 7-19l1-2.8c2.3-6.3 4.6-12.6 7-19.1.1-.2.2-.4.2-.6l1-2.8H106.3v2z" fill="#000" stroke="#fff" stroke-width="4.5"/>',
+  6: '<path d="M112.5 35.5c-2.3 6.3-4.6 12.6-7 19l-1 2.8c-2.3 6.3-4.6 12.6-7 19.1-.1.2-.2.4-.2.6l-1 2.8H85.7v2h-.7l3.6-9.9c2.3-6.3 4.6-12.6 7-19l1-2.8c2.3-6.3 4.6-12.6 7-19.1.1-.2.2-.4.2-.6l1-2.8H112.5v2z" fill="#000" stroke="#fff" stroke-width="4.5"/>',
+  7: '<path d="M129.5 28.5c-2.3 6.3-4.6 12.6-7 19l-1 2.8c-2.3 6.3-4.6 12.6-7 19.1-.1.2-.2.4-.2.6l-1 2.8H102.7v2h-.7l3.6-9.9c2.3-6.3 4.6-12.6 7-19l1-2.8c2.3-6.3 4.6-12.6 7-19.1.1-.2.2-.4.2-.6l1-2.8H129.5v2z" fill="#000" stroke="#fff" stroke-width="4.5"/>',
+  8: '<path d="M114.6 15.6l-1.4 3.7c-5 13.8-11.1 30.7-18.4 50.8L94.1 72l-1.3 3.6h-.7c-4.6 12.6-9.1 25.1-13.6 37.4l-1 2.9-1.3 3.6h-9.6v2.5h16.2c0-.1 0-.3.1-.6s.3-1.2.5-2.6c.3-1.4.5-2.3.5-3.3v-3.3c0-1.4-.2-3.3-.6-5.8h1.2c8.2-22.6 16.4-45.2 24.6-67.8l.2-1h-.1c4.6-12.6 9.1-25.1 13.6-37.5L115 10.3l1.3-3.6h9.6v-2.5h-16.2v.1z" fill="#000" stroke="#fff" stroke-width="4.5"/>',
+  9: '<path d="M136.5 18.2l-1 2.8c-2.3 6.3-4.6 12.6-7 19l-1 2.8c-2.3 6.3-4.6 12.6-7 19.1-.1.2-.2.4-.2.6l-1 2.8H109.7v2h-.7l3.6-9.9c2.3-6.3 4.6-12.6 7-19l1-2.8c2.3-6.3 4.6-12.6 7-19.1.1-.2.2-.4.2-.6l1-2.8H136.5v2z" fill="#000" stroke="#fff" stroke-width="4.5"/>',
+  10: '<path d="M115.6 10.3c-2.3 6.3-4.6 12.6-7 19l-1 2.8c-2.3 6.3-4.6 12.6-7 19.1-.1.2-.2.4-.2.6l-1 2.8H88.8v2h-.7l3.6-9.9c2.3-6.3 4.6-12.6 7-19l1-2.8c2.3-6.3 4.6-12.6 7-19.1.1-.2.2-.4.2-.6l1-2.8H115.6v2z" fill="#000" stroke="#fff" stroke-width="4.5"/>',
+};
+
+// ── Trailer embed component (memoized) ───────────────────────────────────────
+const TrailerEmbed = React.memo(({ movieId, isMuted }) => {
   const [videoKey, setVideoKey] = useState(null)
-  const [loaded,   setLoaded]   = useState(false)
 
   useEffect(() => {
-    if (!movieId) return
-    setVideoKey(null)
-    setLoaded(false)
-    fetch(`${BASE_URL}/${type}/${movieId}/videos?api_key=${API_KEY}&language=en-US`)
+    fetch(`${BASE_URL}/movie/${movieId}/videos?api_key=${API_KEY}&language=en-US`)
       .then(r => r.json())
       .then(d => {
         const v = d.results?.find(v => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser'))
         if (v) setVideoKey(v.key)
       })
       .catch(() => {})
-  }, [movieId, type])
+  }, [movieId])
 
   if (!videoKey) return null
 
   return (
-    <motion.div
-      key={`${videoKey}-${muted}`}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: loaded ? 1 : 0 }}
-      transition={{ duration: 0.6, ease: 'easeOut' }}
-      className="absolute inset-0 z-10 pointer-events-none"
-    >
+    <div className="absolute inset-0 z-10 pointer-events-none">
       <iframe
-        src={`https://www.youtube.com/embed/${videoKey}?autoplay=1&mute=${muted ? 1 : 0}&controls=0&loop=1&playlist=${videoKey}&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`}
-        className="w-full h-full scale-[1.02]"
+        src={`https://www.youtube.com/embed/${videoKey}?autoplay=1&mute=${isMuted ? 1 : 0}&controls=0&loop=1&playlist=${videoKey}&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`}
+        className="w-full h-full scale-[1.3]"
         allow="autoplay; encrypted-media"
-        onLoad={() => setLoaded(true)}
         title="trailer"
         style={{ border: 'none' }}
       />
-    </motion.div>
+    </div>
   )
-}
+})
 
-// ── Scroll arrow (Row level) ──────────────────────────────────────────────────
-function ScrollArrow({ dir, onClick, visible }) {
-  return (
-    <AnimatePresence>
-      {visible && (
-        <motion.button
-          key={dir}
-          initial={{ opacity: 0, scale: 0.8, x: dir === 'left' ? -8 : 8 }}
-          animate={{ opacity: 1, scale: 1, x: 0 }}
-          exit={{ opacity: 0, scale: 0.8, x: dir === 'left' ? -8 : 8 }}
-          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          onClick={e => { 
-            e.preventDefault(); 
-            e.stopPropagation(); 
-            onClick(); 
-          }}
-          className={`
-            pointer-events-auto
-            w-10 h-10 md:w-14 md:h-14 rounded-full
-            bg-[#333333] border border-white/10
-            flex items-center justify-center
-            text-white backdrop-blur-md
-            shadow-[0_4px_24px_rgba(0,0,0,0.8)]
-            hover:bg-white hover:text-black hover:border-white
-            hover:scale-110 active:scale-95
-            transition-all duration-200
-          `}
-          style={{ willChange: 'transform, opacity' }}
-        >
-          {dir === 'left'
-            ? <ChevronLeft  className="w-6 h-6 md:w-8 md:h-8" />
-            : <ChevronRight className="w-6 h-6 md:w-8 md:h-8" />
-          }
-        </motion.button>
-      )}
-    </AnimatePresence>
-  )
-}
-
-// ── Main Row component ────────────────────────────────────────────────────────
-const Row = ({ title, fetchUrl, isLargeRow = false }) => {
-  const [movies,      setMovies]      = useState([])
-  const [hoveredId,   setHoveredId]   = useState(null)
-  const [globalMuted, setGlobalMuted] = useState(true)
-  const [canScrollL,  setCanScrollL]  = useState(false)
-  const [canScrollR,  setCanScrollR]  = useState(true)
-  const [isRowHovered, setIsRowHovered] = useState(false)
+function Row({ title, fetchUrl, isLargeRow = false }) {
+  const [movies, setMovies] = useState([])
+  const [hoveredId, setHoveredId] = useState(null)
+  const [isMuted, setIsMuted] = useState(true)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(true)
 
   const navigate = useNavigate()
-  const rowRef   = useRef(null)
-  const ref      = useRef(null)
-  const inView   = useInView(ref, { once: true, margin: '-60px' })
+  const rowRef = useRef(null)
+  const ref = useRef(null)
+  const inView = useInView(ref, { once: true, margin: '-60px' })
+
+  // Define if this is the special numbered category
+  const isNumbered = title === 'Top 10 in India';
 
   useEffect(() => {
     fetch(`${BASE_URL}${fetchUrl}`)
       .then(r => r.json())
-      .then(d => setMovies(d.results || []))
+      .then(d => setMovies(d.results))
   }, [fetchUrl])
 
-  const updateArrows = useCallback(() => {
+  const updateScrollState = useCallback(() => {
     const el = rowRef.current
     if (!el) return
-    setCanScrollL(el.scrollLeft > 8)
-    setCanScrollR(el.scrollLeft < el.scrollWidth - el.clientWidth - 8)
+    setCanScrollLeft(el.scrollLeft > 2)
+    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 2)
   }, [])
 
   useEffect(() => {
     const el = rowRef.current
     if (!el) return
-    el.addEventListener('scroll', updateArrows, { passive: true })
-    const ro = new ResizeObserver(updateArrows)
+    el.addEventListener('scroll', updateScrollState)
+    const ro = new ResizeObserver(updateScrollState)
     ro.observe(el)
-    updateArrows()
-    return () => { el.removeEventListener('scroll', updateArrows); ro.disconnect() }
-  }, [movies, updateArrows])
+    updateScrollState()
+    return () => { el.removeEventListener('scroll', updateScrollState); ro.disconnect() }
+  }, [movies, updateScrollState])
 
   const scroll = useCallback(dir => {
     const el = rowRef.current
     if (!el) return
-    el.scrollBy({ left: dir === 'left' ? -(el.clientWidth * 0.8) : el.clientWidth * 0.8, behavior: 'smooth' })
+    const amount = dir === 'left' ? -(el.clientWidth * 0.8) : el.clientWidth * 0.8
+    el.scrollBy({ left: amount, behavior: 'smooth' })
   }, [])
 
-  const hasTrailerPlaying = hoveredId !== null
-
   return (
-    <div
-      ref={ref}
-      className="mt-5 md:mt-7 relative group"
-      onMouseEnter={() => setIsRowHovered(true)}
-      onMouseLeave={() => setIsRowHovered(false)}
-    >
-      <div className="flex items-center justify-between pl-4 md:pl-10 pr-4 md:pr-10 mb-2">
+    <div ref={ref} className={`mt-4 md:mt-6 relative group ${isNumbered ? '' : 'px-4 md:px-10'}`}>
+      <motion.div
+        variants={rowTitleVariants}
+        initial="hidden"
+        animate={inView ? 'visible' : 'hidden'}
+        className="flex items-center gap-2 mb-2 group cursor-pointer"
+      >
+        <h2 className="text-xl md:text-2xl font-bold text-gray-100 group-hover:text-primeBlue transition-colors">
+          {title}
+        </h2>
         <motion.div
-          variants={rowTitleVariants}
-          initial="hidden"
-          animate={inView ? 'visible' : 'hidden'}
-          className="flex items-center gap-2 group cursor-pointer"
+          animate={inView ? { x: 0, opacity: 1 } : { x: -6, opacity: 0 }}
+          transition={{ delay: 0.25, duration: 0.3 }}
         >
-          <h2 className="text-xl md:text-2xl font-bold text-gray-100 group-hover:text-primeBlue transition-colors duration-200">
-            {title}
-          </h2>
-          <motion.div
-            animate={inView ? { x: 0, opacity: 1 } : { x: -6, opacity: 0 }}
-            transition={{ delay: 0.25, duration: 0.3 }}
-          >
-            <ChevronRight className="w-5 h-5 text-transparent group-hover:text-primeBlue transition-colors duration-200" />
-          </motion.div>
+          <ChevronRight className="w-5 h-5 text-transparent group-hover:text-primeBlue transition-colors" />
         </motion.div>
-
-        <AnimatePresence>
-          {isRowHovered && hasTrailerPlaying && (
-            <motion.button
-              initial={{ opacity: 0, scale: 0.85, x: 8 }}
-              animate={{ opacity: 1, scale: 1, x: 0 }}
-              exit={{ opacity: 0, scale: 0.85, x: 8 }}
-              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-              onClick={() => setGlobalMuted(m => !m)}
-              className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-400 hover:text-white transition-colors duration-150 px-2.5 py-1 rounded-full border border-white/10 hover:border-white/30 bg-[#333333] backdrop-blur-sm z-[60000]"
-            >
-              {globalMuted
-                ? <><VolumeX className="w-3.5 h-3.5" /> Unmute</>
-                : <><Volume2 className="w-3.5 h-3.5 text-primeBlue" /> Mute</>
-              }
-            </motion.button>
-          )}
-        </AnimatePresence>
-      </div>
+      </motion.div>
 
       <div className="relative">
-        <div className={`absolute left-0 right-0 top-[20px] pointer-events-none flex items-center justify-between z-[50000] ${isLargeRow ? 'h-[407px]' : 'h-[158px]'}`}>
+        {/* Left edge fade gradient - remove for numbered style */}
+        {!isNumbered && (
           <AnimatePresence>
-            {canScrollL && (
+            {canScrollLeft && (
               <motion.div
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
-                className="absolute left-0 top-0 bottom-0 w-16 md:w-24 bg-gradient-to-r from-primeBg to-transparent pointer-events-none"
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="row-fade left-0"
               />
             )}
           </AnimatePresence>
+        )}
 
-          <AnimatePresence>
-            {canScrollR && (
-              <motion.div
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
-                className="absolute right-0 top-0 bottom-0 w-16 md:w-24 bg-gradient-to-l from-primeBg to-transparent pointer-events-none"
-              />
-            )}
-          </AnimatePresence>
-
-          <div className="absolute left-2 md:left-4 z-[50000]">
-            <ScrollArrow dir="left" onClick={() => scroll('left')} visible={canScrollL && isRowHovered} />
-          </div>
-          <div className="absolute right-2 md:right-4 z-[50000]">
-            <ScrollArrow dir="right" onClick={() => scroll('right')} visible={canScrollR && isRowHovered} />
-          </div>
+        {/* Left arrow */}
+        <div className={`absolute left-2 md:left-3 top-1/2 -translate-y-1/2 z-40 transition-opacity ${canScrollLeft ? 'opacity-100' : 'opacity-0'}`}>
+          <button onClick={() => scroll('left')} className="row-arrow">
+            <ChevronLeft className="w-5 h-5 md:w-6 md:h-6" />
+          </button>
         </div>
 
-        <div
-          ref={rowRef}
-          className={`row-scroll-outer px-4 md:px-10 ${isLargeRow ? 'tall-row' : ''}`}
-        >
+        {/* Scrollable track */}
+        <div ref={rowRef} className={`row-scroll-outer ${isLargeRow ? 'tall-row' : ''}`}>
           <div className="movie-row">
-            {movies.map((movie, i) => {
-              if (!movie.backdrop_path) return null
-              const mtype    = movie.media_type || (movie.first_air_date ? 'tv' : 'movie')
-              const isHov    = hoveredId === movie.id
-              const imgSrc   = `${IMAGE_BASE_URL}${isLargeRow ? (movie.poster_path || movie.backdrop_path) : movie.backdrop_path}`
+            {movies.slice(0, 10).map((movie, i) => {
+              if (!movie.backdrop_path || !movie.poster_path) return null
+              const type = movie.first_air_date ? 'tv' : 'movie'
+              const isHov = hoveredId === movie.id
+              const imgSrc = `${IMAGE_BASE_URL}${isLargeRow ? (movie.poster_path || movie.backdrop_path) : movie.backdrop_path}`
 
               return (
                 <motion.div
@@ -236,119 +167,90 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                   variants={cardVariants}
                   initial="hidden"
                   animate={inView ? 'visible' : 'hidden'}
-                  className={`movie-card ${isLargeRow ? 'w-[274px] h-[407px]' : 'w-[280px] h-[158px]'}`}
+                  className={`movie-card relative z-0 ${isNumbered ? 'NumberedStyle' : 'bg-[#1a242f] rounded'}`}
                   onMouseEnter={() => setHoveredId(movie.id)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
+                  {/* The Numbered SVG - only for special category */}
+                  {isNumbered && (
+                    <motion.div
+                      className="absolute left-[-15px] bottom-0 z-0 select-none pointer-events-none"
+                      style={{ height: '90%' }} // Huge height, positioned behind
+                      animate={isHov ? { opacity: 0 } : { opacity: 1 }}
+                      transition={{ duration: 0.2 }}
+                      dangerouslySetInnerHTML={{ __html: `<svg viewBox="0 0 100 100" class="w-full h-full">${topTenNumbers[i + 1]}</svg>` }}
+                    />
+                  )}
+
                   <motion.img
-                    onClick={() => navigate(`/detail/${mtype}/${movie.id}`, { state: { movie } })}
-                    className="thumbnail w-full h-full object-cover rounded cursor-pointer"
+                    onClick={() => navigate(`/detail/${type}/${movie.id}`, { state: { movie } })}
+                    className={`thumbnail w-full h-full object-cover rounded cursor-pointer relative ${isNumbered ? 'z-10' : ''}`}
                     src={imgSrc}
-                    alt={movie.name || movie.title}
+                    alt={movie.title}
                     loading="lazy"
+                    animate={isHov ? { y: 2 } : { y: 0 }}
                     transition={{ duration: 0.3 }}
                   />
 
-                  <div className={`hover-popup ${isLargeRow ? 'large-popup' : 'normal-popup'}`}>
-                    
-                    <div
-                      className={`relative w-full overflow-hidden bg-black cursor-pointer ${isLargeRow ? 'h-[250px]' : 'h-[237px]'}`}
-                      onClick={() => navigate(`/detail/${mtype}/${movie.id}`, { state: { movie } })}
-                    >
+                  {/* Hover popup logic remains standard */}
+                  <div className="hover-popup">
+                    <div className="relative w-full h-[138px] overflow-hidden bg-black rounded-t">
                       <img
                         className="w-full h-full object-cover"
                         src={`${IMAGE_BASE_URL}${movie.backdrop_path}`}
-                        alt={movie.name || movie.title}
+                        alt={movie.title}
                       />
-
-                      {isHov && <TrailerEmbed movieId={movie.id} type={mtype} muted={globalMuted} />}
-
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#00050D] via-transparent to-transparent z-20" />
-
+                      {isHov && <TrailerEmbed movieId={movie.id} isMuted={isMuted} />}
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#1a242f] via-transparent to-transparent z-20" />
+                      <div className="absolute bottom-2.5 right-3 flex items-center gap-1.5 text-[10px] text-white/90 font-bold z-30">
+                        <span className="w-4 h-4 rounded-full border border-white/70 flex items-center justify-center text-[7px]">▶</span>
+                        Apex Player
+                      </div>
                       {isHov && (
                         <motion.button
-                          initial={{ opacity: 0, scale: 0.7 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.7 }}
-                          transition={{ duration: 0.2, delay: 0.3 }}
-                          onClick={e => { e.stopPropagation(); setGlobalMuted(m => !m) }}
-                          className="absolute bottom-3 right-3 z-30 w-8 h-8 rounded-full bg-[#333333] flex items-center justify-center text-white hover:bg-gray-500 transition-colors duration-150"
+                          initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }}
+                          onClick={e => { e.stopPropagation(); setIsMuted(m => !m) }}
+                          className="absolute bottom-2.5 left-3 z-30 w-6 h-6 rounded-full bg-black/60 border border-white/30 flex items-center justify-center text-white hover:bg-white hover:text-black transition-colors"
                         >
-                          {globalMuted
-                            ? <VolumeX className="w-4 h-4" />
-                            : <Volume2 className="w-4 h-4 text-primeBlue" />
-                          }
+                          {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-primeBlue" />}
                         </motion.button>
                       )}
                     </div>
 
-                    <div className={`w-full bg-[#00050D] flex flex-col ${isLargeRow ? 'flex-1 p-4' : 'h-[256px] p-[10px_20px_20px]'}`}>
-                      
-                      <h3
-                        onClick={() => navigate(`/detail/${mtype}/${movie.id}`, { state: { movie } })}
-                        className="text-[20px] font-bold text-white mb-0.5 leading-tight truncate cursor-pointer hover:text-primeBlue transition-colors"
-                      >
-                        {movie.title || movie.name}
-                      </h3>
-                      
-                      <div className="flex items-center gap-1.5 mb-3 text-[11px] font-semibold text-primeBlue opacity-90">
-                         <span className="w-3.5 h-3.5 rounded-full bg-primeBlue text-black flex items-center justify-center text-[8px]">✓</span>
-                         Apex Player (Included)
-                      </div>
-
-                      <div className="flex items-center gap-2.5 mb-3">
-                        <motion.button
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.98 }}
-                          onClick={e => { e.stopPropagation(); navigate(`/play/${mtype}/${movie.id}`) }}
-                          className="flex-[2] flex items-center justify-center gap-2 bg-white text-black py-2.5 rounded-md font-bold text-[15px] hover:bg-gray-200 transition-colors duration-150"
-                        >
-                          <Play fill="currentColor" className="w-5 h-5" /> Play
-                        </motion.button>
-                        
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          className="w-10 h-10 rounded-full flex items-center justify-center text-white bg-[#333333] hover:bg-gray-600 transition-colors duration-150"
-                        >
-                          <PlaySquare className="w-5 h-5" />
-                        </motion.button>
-                        
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          className="w-10 h-10 rounded-full flex items-center justify-center text-white bg-[#333333] hover:bg-gray-600 transition-colors duration-150"
-                        >
-                          <Plus className="w-5 h-5" />
-                        </motion.button>
-                        
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          className="w-10 h-10 rounded-full flex items-center justify-center text-white bg-[#333333] hover:bg-gray-600 transition-colors duration-150"
-                        >
-                          <ThumbsUp className="w-4 h-4" />
-                        </motion.button>
-                      </div>
-
-                      <div className="flex items-center gap-2.5 text-[12px] text-gray-400 mb-2 font-medium">
-                        <span className="bg-gray-800 text-gray-200 px-1.5 py-0.5 rounded text-[10px] font-bold">U/A 16+</span>
-                        <span className="bg-gray-800 text-gray-200 px-1.5 py-0.5 rounded text-[10px] font-bold">CC</span>
+                    <div className="p-3 bg-[#1a242f] rounded-b">
+                      <h3 className="text-sm md:text-base font-bold text-white mb-2 leading-tight truncate">{movie.title || movie.name}</h3>
+                      <div className="flex items-center gap-2 text-[11px] text-gray-400 mb-2 font-semibold">
+                        <span className="border border-gray-600 px-1 py-0.5 rounded text-gray-300">U/A 16+</span>
                         <span>{movie.release_date?.substring(0,4) || movie.first_air_date?.substring(0,4)}</span>
-                        {movie.vote_average > 0 && (
-                          <span className="text-gray-300 ml-1">★ {movie.vote_average.toFixed(1)}</span>
-                        )}
+                        <span className="text-primeBlue">Apex</span>
+                        {movie.vote_average > 0 && <span className="text-yellow-500 font-bold ml-auto">★ {movie.vote_average.toFixed(1)}</span>}
                       </div>
-                      
-                      <p className="text-[13px] text-gray-400 line-clamp-2 leading-snug mt-1">
-                        {movie.overview}
-                      </p>
+                      <p className="text-[11px] text-gray-400 line-clamp-2 leading-relaxed">{movie.overview}</p>
                     </div>
                   </div>
                 </motion.div>
               )
             })}
           </div>
+        </div>
+
+        {/* Right edge fade gradient - remove for numbered style */}
+        {!isNumbered && (
+          <AnimatePresence>
+            {canScrollRight && (
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="row-fade right-0"
+              />
+            )}
+          </AnimatePresence>
+        )}
+
+        {/* Right arrow */}
+        <div className={`absolute right-2 md:right-3 top-1/2 -translate-y-1/2 z-40 transition-opacity ${canScrollRight ? 'opacity-100' : 'opacity-0'}`}>
+          <button onClick={() => scroll('right')} className="row-arrow">
+            <ChevronRight className="w-5 h-5 md:w-6 md:h-6" />
+          </button>
         </div>
       </div>
     </div>
