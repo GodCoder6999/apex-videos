@@ -12,18 +12,15 @@ body {
   overflow-x: hidden;
 }
 
-/* Hide scrollbar */
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
 /* ─── ROW SCROLL ARCHITECTURE ────────────────────────────────────────────────
-   overflow-x:scroll + overflow-y:visible = cards scroll horizontally,
-   popups bleed vertically. Never set overflow:hidden on any ancestor.
-
-   The popup is ~450px tall. Wide cards are only ~170px tall, so the popup
-   extends ~280px below the card bottom. We need padding-bottom >= that,
-   then pull the next row back up with a negative margin-bottom so the
-   visual gap between rows stays normal.
+   overflow-x:scroll + overflow-y:visible = horizontal scroll + popup escape.
+   padding-bottom must be >= (popup total height - card height).
+   Popup is ~460px. Wide cards ~158px → need ~320px padding.
+   Tall cards ~300px → need ~180px padding.
+   margin-bottom compensates so row gap looks normal.
    ────────────────────────────────────────────────────────────────────────── */
 
 .row-scroll-outer {
@@ -32,23 +29,23 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
   position: relative;
-  padding-top: 24px;
-  /* enough room for popup below wide cards */
+  padding-top: 20px;
   padding-bottom: 340px;
   margin-bottom: -300px;
+  scroll-behavior: smooth;
 }
 
 .row-scroll-outer::-webkit-scrollbar { display: none; }
 
-/* Tall/portrait card rows need less bottom space */
+/* Portrait/tall card rows */
 .row-scroll-outer.tall-row {
-  padding-bottom: 180px;
-  margin-bottom: -140px;
+  padding-bottom: 200px;
+  margin-bottom: -160px;
 }
 
 .movie-row {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   overflow: visible;
   flex-wrap: nowrap;
   position: relative;
@@ -58,9 +55,10 @@ body {
 .movie-card {
   position: relative;
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   z-index: 1;
+  /* Delay z-index DROP so popup doesn't flicker on mouse-leave */
   transition: z-index 0s 0.35s;
 }
 
@@ -69,40 +67,47 @@ body {
   transition: z-index 0s 0s;
 }
 
+.movie-card .thumbnail {
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  will-change: opacity, transform;
+}
+
 .movie-card:hover .thumbnail {
-  opacity: 0.3;
+  opacity: 0.25;
+  transform: scale(1.02);
 }
 
 /* ─── POPUP ──────────────────────────────────────────────────────────────────
-   Anchored at top:-20px from card top.
-   The padding-bottom on .row-scroll-outer gives it room to grow downward.
+   Centered above/over card. Arrows positioned inside popup at card edges.
    ────────────────────────────────────────────────────────────────────────── */
 .hover-popup {
   position: absolute;
-  top: -20px;
+  top: -18px;
   left: 50%;
-  transform: translateX(-50%) scale(0.88);
+  transform: translateX(-50%) scale(0.86);
   transform-origin: top center;
-  width: 320px;
-  background-color: var(--color-primeHover);
-  border-radius: 12px;
+  width: 310px;
+  background-color: #1a242f;
+  border-radius: 10px;
   z-index: 10000;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
+  /* Silky cubic-bezier */
   transition:
-    opacity    0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
-    transform  0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
-    visibility 0s   0.25s;
+    opacity    0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform  0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
+    visibility 0s   0.26s;
   box-shadow:
-    0 24px 80px rgba(0, 0, 0, 0.97),
-    0 0 0 1px rgba(255, 255, 255, 0.07);
+    0 8px 32px rgba(0,0,0,0.6),
+    0 24px 80px rgba(0,0,0,0.9),
+    0 0 0 1px rgba(255,255,255,0.07);
   overflow: hidden;
   will-change: transform, opacity;
 }
 
 @media (min-width: 768px) {
-  .hover-popup { width: 380px; }
+  .hover-popup { width: 370px; }
 }
 
 .movie-card:hover .hover-popup {
@@ -111,28 +116,38 @@ body {
   visibility: visible;
   pointer-events: auto;
   transition:
-    opacity    0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
-    transform  0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
+    opacity    0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform  0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
     visibility 0s   0s;
 }
 
-/* First card — popup anchors left */
+/* First card — anchor left */
 .movie-card:first-child .hover-popup {
   left: 0;
-  transform: translateX(0) scale(0.88);
+  transform: translateX(0) scale(0.86);
   transform-origin: top left;
 }
 .movie-card:first-child:hover .hover-popup {
   transform: translateX(0) scale(1);
 }
 
-/* Last card — popup anchors right */
+/* Last card — anchor right */
 .movie-card:last-child .hover-popup {
   left: auto;
   right: 0;
-  transform: translateX(0) scale(0.88);
+  transform: translateX(0) scale(0.86);
   transform-origin: top right;
 }
 .movie-card:last-child:hover .hover-popup {
   transform: translateX(0) scale(1);
+}
+
+/* ─── GLOBAL SMOOTH SCROLLING ────────────────────────────────────────────── */
+* {
+  scroll-behavior: smooth;
+}
+
+/* Smooth all transitions site-wide */
+button, a, [role="button"] {
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
