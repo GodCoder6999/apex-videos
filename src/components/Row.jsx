@@ -1,6 +1,6 @@
 // src/components/Row.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { ChevronRight, ChevronLeft, Play, Plus, Volume2, VolumeX, Ban, PlaySquare } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Play, Plus, Volume2, VolumeX, PlaySquare, ThumbsUp } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { motion, useInView, AnimatePresence } from 'framer-motion'
 
@@ -81,7 +81,7 @@ function ScrollArrow({ dir, onClick, visible }) {
           className={`
             pointer-events-auto
             w-10 h-10 md:w-14 md:h-14 rounded-full
-            bg-black/60 border border-white/20
+            bg-[#333333] border border-white/10
             flex items-center justify-center
             text-white backdrop-blur-md
             shadow-[0_4px_24px_rgba(0,0,0,0.8)]
@@ -179,7 +179,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
               exit={{ opacity: 0, scale: 0.85, x: 8 }}
               transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
               onClick={() => setGlobalMuted(m => !m)}
-              className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-400 hover:text-white transition-colors duration-150 px-2.5 py-1 rounded-full border border-white/10 hover:border-white/30 bg-black/30 backdrop-blur-sm z-[60000]"
+              className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-400 hover:text-white transition-colors duration-150 px-2.5 py-1 rounded-full border border-white/10 hover:border-white/30 bg-[#333333] backdrop-blur-sm z-[60000]"
             >
               {globalMuted
                 ? <><VolumeX className="w-3.5 h-3.5" /> Unmute</>
@@ -191,7 +191,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
       </div>
 
       <div className="relative">
-        <div className={`absolute left-0 right-0 top-[20px] pointer-events-none flex items-center justify-between z-[50000] ${isLargeRow ? 'h-[584px]' : 'h-[158px]'}`}>
+        <div className={`absolute left-0 right-0 top-[20px] pointer-events-none flex items-center justify-between z-[50000] ${isLargeRow ? 'h-[407px]' : 'h-[158px]'}`}>
           <AnimatePresence>
             {canScrollL && (
               <motion.div
@@ -236,11 +236,10 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                   variants={cardVariants}
                   initial="hidden"
                   animate={inView ? 'visible' : 'hidden'}
-                  className={`movie-card ${isLargeRow ? 'w-[368px] h-[584px]' : 'w-[280px] h-[158px]'}`}
+                  className={`movie-card ${isLargeRow ? 'w-[274px] h-[407px]' : 'w-[280px] h-[158px]'}`}
                   onMouseEnter={() => setHoveredId(movie.id)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
-                  {/* Thumbnail */}
                   <motion.img
                     onClick={() => navigate(`/detail/${mtype}/${movie.id}`, { state: { movie } })}
                     className="thumbnail w-full h-full object-cover rounded cursor-pointer"
@@ -250,12 +249,10 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                     transition={{ duration: 0.3 }}
                   />
 
-                  {/* Hover popup linking to our CSS classes for explicit bounds */}
                   <div className={`hover-popup ${isLargeRow ? 'large-popup' : 'normal-popup'}`}>
                     
-                    {/* Top half: Exactly 237px height */}
                     <div
-                      className={`relative w-full overflow-hidden bg-black cursor-pointer ${isLargeRow ? 'h-[75%]' : 'h-[237px]'}`}
+                      className={`relative w-full overflow-hidden bg-black cursor-pointer ${isLargeRow ? 'h-[250px]' : 'h-[237px]'}`}
                       onClick={() => navigate(`/detail/${mtype}/${movie.id}`, { state: { movie } })}
                     >
                       <img
@@ -266,7 +263,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
 
                       {isHov && <TrailerEmbed movieId={movie.id} type={mtype} muted={globalMuted} />}
 
-                      <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent z-20" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#00050D] via-transparent to-transparent z-20" />
 
                       {isHov && (
                         <motion.button
@@ -275,7 +272,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                           exit={{ opacity: 0, scale: 0.7 }}
                           transition={{ duration: 0.2, delay: 0.3 }}
                           onClick={e => { e.stopPropagation(); setGlobalMuted(m => !m) }}
-                          className="absolute bottom-3 right-3 z-30 w-8 h-8 rounded-full bg-black/60 border border-white/30 flex items-center justify-center text-white hover:bg-white hover:text-black transition-colors duration-150"
+                          className="absolute bottom-3 right-3 z-30 w-8 h-8 rounded-full bg-[#333333] flex items-center justify-center text-white hover:bg-gray-500 transition-colors duration-150"
                         >
                           {globalMuted
                             ? <VolumeX className="w-4 h-4" />
@@ -285,8 +282,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                       )}
                     </div>
 
-                    {/* Bottom half: Exactly 256px height, with padding 10px 20px 20px */}
-                    <div className={`w-full bg-[#000000] flex flex-col ${isLargeRow ? 'flex-1 p-5' : 'h-[256px] p-[10px_20px_20px]'}`}>
+                    <div className={`w-full bg-[#00050D] flex flex-col ${isLargeRow ? 'flex-1 p-4' : 'h-[256px] p-[10px_20px_20px]'}`}>
                       
                       <h3
                         onClick={() => navigate(`/detail/${mtype}/${movie.id}`, { state: { movie } })}
@@ -301,12 +297,11 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                       </div>
 
                       <div className="flex items-center gap-2.5 mb-3">
-                        {/* Light blue play button similar to screenshot */}
                         <motion.button
                           whileHover={{ scale: 1.02 }}
                           whileTap={{ scale: 0.98 }}
                           onClick={e => { e.stopPropagation(); navigate(`/play/${mtype}/${movie.id}`) }}
-                          className="flex-[2] flex items-center justify-center gap-2 bg-[#a8c7fa] text-[#052d49] py-2.5 rounded-md font-bold text-[15px] hover:bg-[#8ab4f8] transition-colors duration-150"
+                          className="flex-[2] flex items-center justify-center gap-2 bg-white text-black py-2.5 rounded-md font-bold text-[15px] hover:bg-gray-200 transition-colors duration-150"
                         >
                           <Play fill="currentColor" className="w-5 h-5" /> Play
                         </motion.button>
@@ -314,7 +309,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                         <motion.button
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}
-                          className="w-10 h-10 rounded-full border border-gray-500 flex items-center justify-center text-white hover:border-white transition-colors duration-150 bg-white/10"
+                          className="w-10 h-10 rounded-full flex items-center justify-center text-white bg-[#333333] hover:bg-gray-600 transition-colors duration-150"
                         >
                           <PlaySquare className="w-5 h-5" />
                         </motion.button>
@@ -322,7 +317,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                         <motion.button
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}
-                          className="w-10 h-10 rounded-full border border-gray-500 flex items-center justify-center text-white hover:border-white transition-colors duration-150 bg-white/10"
+                          className="w-10 h-10 rounded-full flex items-center justify-center text-white bg-[#333333] hover:bg-gray-600 transition-colors duration-150"
                         >
                           <Plus className="w-5 h-5" />
                         </motion.button>
@@ -330,9 +325,9 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                         <motion.button
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}
-                          className="w-10 h-10 rounded-full border border-gray-500 flex items-center justify-center text-white hover:border-white transition-colors duration-150 bg-white/10"
+                          className="w-10 h-10 rounded-full flex items-center justify-center text-white bg-[#333333] hover:bg-gray-600 transition-colors duration-150"
                         >
-                          <Ban className="w-4 h-4" />
+                          <ThumbsUp className="w-4 h-4" />
                         </motion.button>
                       </div>
 
@@ -345,7 +340,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                         )}
                       </div>
                       
-                      <p className="text-[13px] text-gray-400 line-clamp-3 leading-snug mt-1">
+                      <p className="text-[13px] text-gray-400 line-clamp-2 leading-snug mt-1">
                         {movie.overview}
                       </p>
                     </div>
