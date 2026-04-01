@@ -129,7 +129,8 @@ function Home() {
   const visibleCategories = allCategories.slice(0, visibleCount)
 
   return (
-    <div className="bg-[#0f171e] min-h-screen">
+    {/* CHANGED: Swapped bg-[#0f171e] for bg-[#00050D] */}
+    <div className="bg-[#00050D] min-h-screen">
       <Banner />
 
       <div className="-mt-12 md:-mt-24 relative z-20 pb-10">
