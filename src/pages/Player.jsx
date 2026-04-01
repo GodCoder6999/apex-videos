@@ -320,7 +320,7 @@ const Ic = {
   Mute:   () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:22,height:22}}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>,
   PiP:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:22,height:22}}><rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="12" width="8" height="6" rx="1" fill="currentColor" stroke="none"/></svg>,
   FS:     () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:22,height:22}}><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>,
-  FSExit: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:22,height:22}}><polyline points="8 3 3 3 3 8"/><polyline points="21 8 21 3 16 3"/><polyline points="3 16 3 21 8 21"/><polyline points="16 21 21 21 21 16"/></svg>,
+  FSExit: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:22,height:22}}><polyline points="8 3 3 3 3 8"/><polyline points="21 8 21 3 21 3 16 3"/><polyline points="3 16 3 21 8 21"/><polyline points="16 21 21 21 21 16"/></svg>,
   More:   () => <svg viewBox="0 0 24 24" fill="currentColor" style={{width:22,height:22}}><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>,
   ChR:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{width:14,height:14}}><polyline points="9 18 15 12 9 6"/></svg>,
   ChL:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{width:18,height:18}}><polyline points="15 18 9 12 15 6"/></svg>,
@@ -483,27 +483,35 @@ export default function Player() {
     })
 
     hls.on(Hls.Events.LEVEL_SWITCHED, (_, d) => setActiveQId(hls.autoLevelEnabled ? -1 : d.level))
+    
+    // UPDATED ERROR HANDLER: Tell HLS to recover media errors instead of failing
     hls.on(Hls.Events.ERROR, (_, d) => {
       if (!d.fatal) return
-      if (d.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad()
-      else { setLoadState('error'); setErrorMsg('Fatal stream error. Please retry.') }
+      if (d.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        hls.startLoad()
+      } else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) {
+        hls.recoverMediaError() 
+      } else { 
+        setLoadState('error'); setErrorMsg('Fatal stream error. Please retry.') 
+      }
     })
   }, [id, imdbId, type, season, episode])
 
   useEffect(() => { boot(); return () => { if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null } } }, [boot])
 
-  // Video events
+  // Video events (UPDATED TO SELF-HEAL UI STATE)
   useEffect(() => {
     const v = videoRef.current; if (!v) return
     const H = {
-      play: ()=>setPlaying(true), pause: ()=>setPlaying(false),
+      play: ()=>{ setPlaying(true); setLoadState('playing'); },
+      pause: ()=>setPlaying(false),
       timeupdate: ()=>{ setCurrent(v.currentTime); if(v.buffered.length) setBuffered(v.buffered.end(v.buffered.length-1)) },
       loadedmetadata: ()=>{ setDuration(v.duration); v.volume=volume },
       durationchange: ()=>setDuration(v.duration),
       volumechange: ()=>{ setVolume(v.volume); setMuted(v.muted) },
       waiting: ()=>setIsBuffering(true),
-      playing: ()=>setIsBuffering(false),
-      canplay: ()=>setIsBuffering(false),
+      playing: ()=>{ setIsBuffering(false); setLoadState('playing'); },
+      canplay: ()=>{ setIsBuffering(false); setLoadState('playing'); },
     }
     Object.entries(H).forEach(([e,fn])=>v.addEventListener(e,fn))
     return ()=>Object.entries(H).forEach(([e,fn])=>v.removeEventListener(e,fn))
@@ -583,7 +591,13 @@ export default function Player() {
       nh.on(Hls.Events.MANIFEST_PARSED, () => {
         v.currentTime = wasTime; if (wasPlaying) v.play().catch(()=>{})
       })
-      nh.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { setLoadState('error'); setErrorMsg('Audio track failed.') } })
+      // UPDATED ERROR HANDLER
+      nh.on(Hls.Events.ERROR, (_, d) => {
+        if (!d.fatal) return
+        if (d.type === Hls.ErrorTypes.NETWORK_ERROR) nh.startLoad()
+        else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) nh.recoverMediaError()
+        else { setLoadState('error'); setErrorMsg('Audio track failed.') }
+      })
       return
     }
 
@@ -603,7 +617,13 @@ export default function Player() {
         if (match) nh.audioTrack = match.id
         v.currentTime = wasTime; if (wasPlaying) v.play().catch(()=>{})
       })
-      nh.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { setLoadState('error'); setErrorMsg('Source switch failed.') } })
+      // UPDATED ERROR HANDLER
+      nh.on(Hls.Events.ERROR, (_, d) => {
+        if (!d.fatal) return
+        if (d.type === Hls.ErrorTypes.NETWORK_ERROR) nh.startLoad()
+        else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) nh.recoverMediaError()
+        else { setLoadState('error'); setErrorMsg('Source switch failed.') }
+      })
       setSrcLabel(src.label)
     }
   }, [])
