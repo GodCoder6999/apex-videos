@@ -7,14 +7,11 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  // Only used during local dev — Vercel uses api/proxy.js instead
   server: {
     proxy: {
       '/api/proxy': {
         target: 'http://localhost:5173',
         bypass(req, res) {
-          // In dev, inline the same proxy logic so you don't need the
-          // Vercel CLI running locally. Just run `vite dev` as normal.
           const params = new URLSearchParams(req.url.replace(/^[^?]*\?/, ''))
           const target = params.get('url')
           if (!target) { res.statusCode = 400; res.end('missing url'); return }
@@ -22,7 +19,6 @@ export default defineConfig({
           const decoded = decodeURIComponent(target)
           const origin  = decoded.match(/^(https?:\/\/[^/]+)/)?.[1] || 'https://vidsrc.me'
 
-          // Async handler — attach to res so Vite knows we're handling it
           ;(async () => {
             try {
               const up = await fetch(decoded, {
@@ -42,7 +38,24 @@ export default defineConfig({
               if (isM) {
                 const text = await up.text()
                 const base = decoded.substring(0, decoded.lastIndexOf('/') + 1)
-                const out  = rewriteManifest(text, base)
+                
+                // FIX: Safely rewrite the manifest
+                const out = text
+                  .split('\n')
+                  .map(line => {
+                    const t = line.trim()
+                    if (!t) return line
+                    if (t.startsWith('#')) {
+                      return line.replace(/URI="([^"]+)"/g, (match, uri) => {
+                        const abs = toAbs(uri, base)
+                        return `URI="/api/proxy?url=${encodeURIComponent(abs)}"`
+                      })
+                    }
+                    const abs = toAbs(t, base)
+                    return `/api/proxy?url=${encodeURIComponent(abs)}`
+                  })
+                  .join('\n')
+                  
                 res.end(out)
               } else {
                 const buf = await up.arrayBuffer()
@@ -54,27 +67,12 @@ export default defineConfig({
             }
           })()
 
-          return false  // tells Vite we handled it
+          return false  
         },
       },
     },
   },
 })
-
-function rewriteManifest(text, base) {
-  return text.split('\n').map(line => {
-    const t = line.trim()
-    if (!t) return line
-    if (t.startsWith('#')) {
-      return line.replace(/URI="([^"]+)"/g, (_, uri) => {
-        const abs = toAbs(uri, base)
-        return `URI="/api/proxy?url=${encodeURIComponent(abs)}"`
-      })
-    }
-    const abs = toAbs(t, base)
-    return `/api/proxy?url=${encodeURIComponent(abs)}`
-  }).join('\n')
-}
 
 function toAbs(url, base) {
   if (url.startsWith('http')) return url
