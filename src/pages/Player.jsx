@@ -268,8 +268,10 @@ export default function Player() {
         }
       } catch (_) {}
 
-      // 2. Fetch stream list from Nuvio
-      const nuvioUrl = `https://nuviostreams.hayd.uk/stream/${type}/${streamId}.json`
+      // 2. Fetch stream list from Nuvio 
+      // FIX: Stremio addons require 'series' instead of 'tv' in the API route!
+      const stremioType = type === 'tv' ? 'series' : 'movie'
+      const nuvioUrl = `https://nuviostreams.hayd.uk/stream/${stremioType}/${streamId}.json`
       const json = await safeJsonFetch(nuvioUrl)
       stepTimers.current.forEach(clearTimeout)
 
@@ -278,7 +280,7 @@ export default function Player() {
       const stream = json.streams.find(s => s.url)
       if (!stream) throw new Error('No playable stream URL found.')
 
-      // --- FIX: Pass the raw stream URL through our proxy so CORS isn't blocked ---
+      // Wrap the Nuvio URL through our local proxy
       m3u8   = `/api/proxy?url=${encodeURIComponent(stream.url)}`
       source = stream.name
         ? `${stream.name}${stream.title ? ' · ' + stream.title.split('\n')[0] : ''}`
@@ -299,9 +301,10 @@ export default function Player() {
     const video2 = videoRef.current
     if (!video2) return
 
-    const isM3U8 = /\.m3u8/i.test(m3u8) || stream.url.includes('.m3u8') // Check original URL for extension too
+    // Ensure we handle HTTP direct formats accurately (not just `.m3u8` from URL)
+    const isM3U8 = /\.m3u8/i.test(m3u8) || decodeURIComponent(m3u8).includes('.m3u8')
 
-    // ── Native fallback (Safari / no HLS support) ───────────────────────────
+    // ── Native fallback (For direct MP4s / MKVs or Safari) ──────────────────
     if (!isM3U8 || !Hls || !Hls.isSupported()) {
       video2.src = m3u8
       setLoadState('playing')
@@ -317,7 +320,7 @@ export default function Player() {
       backBufferLength:         90,
       maxBufferLength:          60,
       maxMaxBufferLength:       600,
-      startLevel:               -1,       // auto quality
+      startLevel:               -1,       
       manifestLoadingMaxRetry:  4,
       levelLoadingMaxRetry:     4,
       fragLoadingMaxRetry:      6,
@@ -347,18 +350,15 @@ export default function Player() {
       setQualities(qs)
       setActiveQuality(-1)
 
-      // Audio tracks
+      // Audio tracks mapped properly with Nuvio
       const at = hls.audioTracks || []
       if (at.length > 0) {
-        // --- FIX: Map the tracks using the actual internal track ID (t.id) ---
         const mapped = at.map(t => ({
           id:    t.id, 
           label: t.name || t.lang || `Track ${t.id}`,
           lang:  t.lang || '',
         }))
         setAudioTracks(mapped)
-        
-        // Pick default track
         const defTrack = at.find(t => t.default) || at[0]
         const defId = defTrack ? defTrack.id : 0
         setActiveAudio(defId)
@@ -380,7 +380,6 @@ export default function Player() {
     })
 
     hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_, d) => {
-      // --- FIX: Map the updated tracks using the actual internal track ID (t.id) ---
       const mapped = (d.audioTracks || []).map(t => ({
         id:    t.id,
         label: t.name || t.lang || `Track ${t.id}`,
@@ -433,7 +432,6 @@ export default function Player() {
     const onLoadedMeta = () => {
       setDuration(v.duration)
       v.volume = volume
-      // Native audio tracks (Safari)
       if (!hlsRef.current && v.audioTracks?.length > 0) {
         const tracks = Array.from(v.audioTracks).map((t, i) => ({
           id: i, label: t.label || t.language || `Track ${i + 1}`, lang: t.language || '',
