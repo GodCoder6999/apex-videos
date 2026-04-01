@@ -62,7 +62,7 @@ function TrailerEmbed({ movieId, type = 'movie', muted }) {
   )
 }
 
-// ── Scroll arrow (appears on card hover region) ───────────────────────────────
+// ── Scroll arrow (Row level) ──────────────────────────────────────────────────
 function ScrollArrow({ dir, onClick, visible }) {
   return (
     <AnimatePresence>
@@ -75,22 +75,21 @@ function ScrollArrow({ dir, onClick, visible }) {
           transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
           onClick={e => { e.stopPropagation(); onClick() }}
           className={`
-            absolute top-1/2 -translate-y-1/2 z-[200]
-            ${dir === 'left' ? 'left-1 md:left-2' : 'right-1 md:right-2'}
-            w-8 h-8 md:w-10 md:h-10 rounded-full
-            bg-black/70 border border-white/25
+            pointer-events-auto
+            w-10 h-10 md:w-12 md:h-12 rounded-full
+            bg-black/60 border border-white/20
             flex items-center justify-center
-            text-white backdrop-blur-sm
+            text-white backdrop-blur-md
             shadow-[0_4px_24px_rgba(0,0,0,0.8)]
             hover:bg-white hover:text-black hover:border-white
             hover:scale-110 active:scale-95
-            transition-colors duration-150
+            transition-all duration-200
           `}
-          style={{ willChange: 'transform' }}
+          style={{ willChange: 'transform, opacity' }}
         >
           {dir === 'left'
-            ? <ChevronLeft  className="w-4 h-4 md:w-5 md:h-5" />
-            : <ChevronRight className="w-4 h-4 md:w-5 md:h-5" />
+            ? <ChevronLeft  className="w-5 h-5 md:w-6 md:h-6" />
+            : <ChevronRight className="w-5 h-5 md:w-6 md:h-6" />
           }
         </motion.button>
       )}
@@ -129,7 +128,6 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
     const el = rowRef.current
     if (!el) return
     el.addEventListener('scroll', updateArrows, { passive: true })
-    // Use ResizeObserver to catch layout shifts
     const ro = new ResizeObserver(updateArrows)
     ro.observe(el)
     updateArrows()
@@ -142,13 +140,12 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
     el.scrollBy({ left: dir === 'left' ? -(el.clientWidth * 0.8) : el.clientWidth * 0.8, behavior: 'smooth' })
   }, [])
 
-  // Any trailer playing in this row?
   const hasTrailerPlaying = hoveredId !== null
 
   return (
     <div
       ref={ref}
-      className="mt-5 md:mt-7 relative"
+      className="mt-5 md:mt-7 relative group"
       onMouseEnter={() => setIsRowHovered(true)}
       onMouseLeave={() => setIsRowHovered(false)}
     >
@@ -171,7 +168,6 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
           </motion.div>
         </motion.div>
 
-        {/* Row-level mute toggle — only visible when hovering row */}
         <AnimatePresence>
           {isRowHovered && hasTrailerPlaying && (
             <motion.button
@@ -191,29 +187,40 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
         </AnimatePresence>
       </div>
 
-      {/* Scroll container */}
       <div className="relative">
-        {/* Left fade edge */}
-        <AnimatePresence>
-          {canScrollL && (
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              transition={{ duration: 0.25 }}
-              className="absolute left-0 top-0 bottom-0 w-16 md:w-20 bg-gradient-to-r from-[#0f171e] to-transparent z-[150] pointer-events-none"
-            />
-          )}
-        </AnimatePresence>
+        
+        {/* Absolute Wrapper for Fades and Arrows — locked strictly to card height to avoid covering popups */}
+        <div className={`absolute left-0 right-0 top-[20px] pointer-events-none flex items-center justify-between z-[150] ${isLargeRow ? 'h-[240px] md:h-[300px]' : 'h-[118px] md:h-[158px]'}`}>
+          
+          {/* Left edge fade */}
+          <AnimatePresence>
+            {canScrollL && (
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
+                className="absolute left-0 top-0 bottom-0 w-16 md:w-24 bg-gradient-to-r from-primeBg to-transparent pointer-events-none"
+              />
+            )}
+          </AnimatePresence>
 
-        {/* Right fade edge */}
-        <AnimatePresence>
-          {canScrollR && (
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              transition={{ duration: 0.25 }}
-              className="absolute right-0 top-0 bottom-0 w-16 md:w-20 bg-gradient-to-l from-[#0f171e] to-transparent z-[150] pointer-events-none"
-            />
-          )}
-        </AnimatePresence>
+          {/* Right edge fade */}
+          <AnimatePresence>
+            {canScrollR && (
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
+                className="absolute right-0 top-0 bottom-0 w-16 md:w-24 bg-gradient-to-l from-primeBg to-transparent pointer-events-none"
+              />
+            )}
+          </AnimatePresence>
+
+          {/* Scrolling Arrows (Only appear when hovering the entire row + can scroll in that direction) */}
+          <div className="absolute left-2 md:left-4 z-[200]">
+            <ScrollArrow dir="left" onClick={() => scroll('left')} visible={canScrollL && isRowHovered} />
+          </div>
+          <div className="absolute right-2 md:right-4 z-[200]">
+            <ScrollArrow dir="right" onClick={() => scroll('right')} visible={canScrollR && isRowHovered} />
+          </div>
+
+        </div>
 
         {/* Scrollable track */}
         <div
@@ -250,7 +257,6 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
 
                   {/* Hover popup */}
                   <div className="hover-popup">
-                    {/* Preview area */}
                     <div
                       className="relative w-full h-[138px] md:h-[175px] overflow-hidden bg-black cursor-pointer"
                       onClick={() => navigate(`/detail/${mtype}/${movie.id}`, { state: { movie } })}
@@ -261,19 +267,15 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                         alt={movie.name || movie.title}
                       />
 
-                      {/* Trailer */}
                       {isHov && <TrailerEmbed movieId={movie.id} type={mtype} muted={globalMuted} />}
 
-                      {/* Gradient overlay */}
                       <div className="absolute inset-0 bg-gradient-to-t from-[#1a242f] via-transparent to-transparent z-20" />
 
-                      {/* Apex Player badge */}
                       <div className="absolute bottom-2.5 right-3 flex items-center gap-1.5 text-[10px] text-white/90 font-bold z-30">
                         <span className="w-4 h-4 rounded-full border border-white/70 flex items-center justify-center text-[7px]">▶</span>
                         Apex Player
                       </div>
 
-                      {/* Per-popup mute button — only when trailer loaded */}
                       {isHov && (
                         <motion.button
                           initial={{ opacity: 0, scale: 0.7 }}
@@ -291,7 +293,6 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                       )}
                     </div>
 
-                    {/* Info section */}
                     <div className="p-3.5 bg-[#1a242f]">
                       <h3
                         onClick={() => navigate(`/detail/${mtype}/${movie.id}`, { state: { movie } })}
@@ -330,10 +331,6 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
                       </div>
                       <p className="text-[11px] text-gray-400 line-clamp-2 leading-relaxed">{movie.overview}</p>
                     </div>
-
-                    {/* Scroll arrows INSIDE popup — sit on top of the card edges */}
-                    <ScrollArrow dir="left"  onClick={() => scroll('left')}  visible={canScrollL} />
-                    <ScrollArrow dir="right" onClick={() => scroll('right')} visible={canScrollR} />
                   </div>
                 </motion.div>
               )
