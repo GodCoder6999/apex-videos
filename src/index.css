@@ -1,13 +1,13 @@
 @import "tailwindcss";
 
 @theme {
-  --color-primeBg: #0f171e;
-  --color-primeHover: #1a242f;
+  --color-primeBg: #00050D;
+  --color-primeHover: #333333;
   --color-primeBlue: #00a8e1;
 }
 
 body {
-  background-color: #0f171e;
+  background-color: #00050D;
   color: white;
   overflow-x: hidden;
 }
@@ -15,10 +15,7 @@ body {
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
-/* ─── ROW SCROLL ARCHITECTURE ────────────────────────────────────────────────
-   Adjusted padding-bottom for the new 493px tall popups
-   ────────────────────────────────────────────────────────────────────────── */
-
+/* ─── ROW SCROLL ARCHITECTURE ──────────────────────────────────────────────── */
 .row-scroll-outer {
   overflow-x: scroll;
   overflow-y: visible;
@@ -26,17 +23,16 @@ body {
   scrollbar-width: none;
   position: relative;
   padding-top: 20px;
-  padding-bottom: 380px;
+  padding-bottom: 380px; 
   margin-bottom: -340px;
   scroll-behavior: smooth;
 }
 
 .row-scroll-outer::-webkit-scrollbar { display: none; }
 
-/* Portrait/tall card rows */
 .row-scroll-outer.tall-row {
-  padding-bottom: 100px;
-  margin-bottom: -60px;
+  padding-bottom: 30px;
+  margin-bottom: -10px;
 }
 
 .movie-row {
@@ -69,17 +65,12 @@ body {
 
 .movie-card:hover .thumbnail {
   opacity: 0.25;
-  transform: scale(1.02);
 }
 
-/* ─── EXACT POPUP DIMENSIONS ────────────────────────────────────────────────── */
+/* ─── BASE POPUP ──────────────────────────────────── */
 .hover-popup {
   position: absolute;
-  top: -18px;
-  left: 50%;
-  transform: translateX(-50%) scale(0.86);
-  transform-origin: top center;
-  background-color: #000000;
+  background-color: #00050D;
   border-radius: 8px;
   z-index: 10000;
   opacity: 0;
@@ -99,21 +90,7 @@ body {
   flex-direction: column;
 }
 
-/* Normal Card Popup (Width: 422px, Height: 493px) */
-.hover-popup.normal-popup {
-  width: 422px;
-  height: 493px;
-}
-
-/* Large Banner Popup */
-.hover-popup.large-popup {
-  width: 985px;
-  height: 554px;
-  top: 15px; 
-}
-
 .movie-card:hover .hover-popup {
-  transform: translateX(-50%) scale(1);
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -123,26 +100,54 @@ body {
     visibility 0s   0s;
 }
 
-/* Anchor edges so they don't bleed off screen horizontally */
-.movie-card:first-child .hover-popup {
+/* ─── NORMAL POPUP (Width: 422px, Height: 493px) ───────────── */
+.hover-popup.normal-popup {
+  width: 422px;
+  height: 493px;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%) scale(0.86);
+  transform-origin: top center;
+}
+.movie-card:hover .hover-popup.normal-popup {
+  transform: translateX(-50%) scale(1);
+}
+
+.movie-card:first-child .hover-popup.normal-popup {
   left: 0;
   transform: translateX(0) scale(0.86);
   transform-origin: top left;
 }
-.movie-card:first-child:hover .hover-popup {
+.movie-card:first-child:hover .hover-popup.normal-popup {
   transform: translateX(0) scale(1);
 }
-
-.movie-card:last-child .hover-popup {
+.movie-card:last-child .hover-popup.normal-popup {
   left: auto;
   right: 0;
   transform: translateX(0) scale(0.86);
   transform-origin: top right;
 }
-.movie-card:last-child:hover .hover-popup {
+.movie-card:last-child:hover .hover-popup.normal-popup {
   transform: translateX(0) scale(1);
 }
 
-* {
-  scroll-behavior: smooth;
+/* ─── LARGE BANNER POPUP (Width: 721px, Height: 406px) ────────── */
+.hover-popup.large-popup {
+  width: 721px;
+  height: 406px;
+  top: 0; 
+  left: 0; 
+  transform: scale(0.95);
+  transform-origin: center left;
 }
+.movie-card:hover .hover-popup.large-popup {
+  transform: scale(1);
+}
+
+.movie-card:last-child .hover-popup.large-popup {
+  left: auto;
+  right: 0;
+  transform-origin: center right;
+}
+
+* { scroll-behavior: smooth; }
