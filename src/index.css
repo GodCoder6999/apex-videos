@@ -21,30 +21,50 @@ body {
     scrollbar-width: none;
 }
 
-/* Append this to the bottom of src/index.css */
+/* ─── ROW SCROLL ARCHITECTURE ────────────────────────────────────────────────
+   The trick: the OUTER wrapper scrolls (overflow-x: scroll) but has
+   overflow-y: visible so popups can escape upward/downward.
+   The INNER track also stays overflow: visible.
+   The card z-index boost happens at the row level via isolation.
+   ────────────────────────────────────────────────────────────────────────── */
 
-/* CRITICAL: Replaces overflow-x-scroll to prevent clipping */
+.row-scroll-outer {
+  overflow-x: scroll;
+  overflow-y: visible;   /* ← lets popups bleed out vertically */
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  /* padding gives vertical room for the popup to appear */
+  padding-top: 20px;
+  padding-bottom: 80px;
+  /* clip only horizontally at the row edges via margin trick */
+  position: relative;
+}
+
+.row-scroll-outer::-webkit-scrollbar {
+  display: none;
+}
+
 .movie-row {
   display: flex;
   gap: 16px;
-  overflow: visible; 
-  padding: 20px 0;
+  overflow: visible;
   flex-wrap: nowrap;
+  /* don't clip children */
+  position: relative;
 }
 
+/* ─── CARD ─────────────────────────────────────────────────────────────────── */
 .movie-card {
   position: relative;
   flex-shrink: 0;
   border-radius: 8px;
   cursor: pointer;
   z-index: 1;
-  /* Delays the z-index drop when moving the mouse off the card */
-  transition: z-index 0s 0.35s; 
+  transition: z-index 0s 0.35s;
 }
 
-/* Instantly boosts z-index when hovered so it sits above all rows */
 .movie-card:hover {
-  z-index: 99999;
+  z-index: 999;
   transition: z-index 0s 0s;
 }
 
@@ -52,22 +72,33 @@ body {
   opacity: 0.3;
 }
 
+/* ─── POPUP ─────────────────────────────────────────────────────────────────
+   position: fixed would escape all containers but loses scroll sync.
+   position: absolute with a high z-index works because the card's
+   stacking context is raised and the outer scroll container has
+   overflow-y: visible.
+   ────────────────────────────────────────────────────────────────────────── */
 .hover-popup {
   position: absolute;
   top: -20px;
-  left: -40px;
+  left: 50%;
+  transform: translateX(-50%) scale(0.85);
+  transform-origin: top center;
   width: 320px;
   background-color: var(--color-primeHover);
   border-radius: 12px;
-  z-index: 100000;
+  z-index: 1000;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: scale(0.85);
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.9);
-  transform-origin: top left;
+  transition:
+    opacity    0.28s cubic-bezier(0.25, 0.8, 0.25, 1),
+    transform  0.28s cubic-bezier(0.25, 0.8, 0.25, 1),
+    visibility 0s   0.28s;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255,255,255,0.06);
   overflow: hidden;
+  /* Ensure popup is never clipped by parent scroll */
+  will-change: transform, opacity;
 }
 
 @media (min-width: 768px) {
@@ -75,31 +106,38 @@ body {
 }
 
 .movie-card:hover .hover-popup {
-  transform: scale(1);
+  transform: translateX(-50%) scale(1);
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
+  transition:
+    opacity    0.28s cubic-bezier(0.25, 0.8, 0.25, 1),
+    transform  0.28s cubic-bezier(0.25, 0.8, 0.25, 1),
+    visibility 0s   0s;
 }
 
-/* Middle cards center their popup */
-.movie-card:nth-child(n+2):nth-last-child(n+2) .hover-popup {
-  left: 50%;
-  transform: translateX(-50%) scale(0.85);
-  transform-origin: center top;
-}
-.movie-card:nth-child(n+2):nth-last-child(n+2):hover .hover-popup {
-  transform: translateX(-50%) scale(1);
-}
+/* ─── EDGE CARD CORRECTIONS ─────────────────────────────────────────────────
+   First card: align popup to the left edge of the card
+   Last card:  align popup to the right edge of the card
+   ────────────────────────────────────────────────────────────────────────── */
 
-/* First card aligns flush left */
+/* First card — popup anchors left */
 .movie-card:first-child .hover-popup {
-  left: -10px;
-  transform-origin: left top;
+  left: 0;
+  transform: translateX(0) scale(0.85);
+  transform-origin: top left;
+}
+.movie-card:first-child:hover .hover-popup {
+  transform: translateX(0) scale(1);
 }
 
-/* Last card aligns flush right */
+/* Last card — popup anchors right */
 .movie-card:last-child .hover-popup {
   left: auto;
-  right: -10px;
-  transform-origin: right top;
+  right: 0;
+  transform: translateX(0) scale(0.85);
+  transform-origin: top right;
+}
+.movie-card:last-child:hover .hover-popup {
+  transform: translateX(0) scale(1);
 }
