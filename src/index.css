@@ -16,8 +16,7 @@ body {
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
 /* ─── ROW SCROLL ARCHITECTURE ────────────────────────────────────────────────
-   padding-bottom must accommodate the massive 670px popups so they 
-   don't clip out of the overflow-x container.
+   Adjusted padding-bottom for the new 493px tall popups
    ────────────────────────────────────────────────────────────────────────── */
 
 .row-scroll-outer {
@@ -27,9 +26,8 @@ body {
   scrollbar-width: none;
   position: relative;
   padding-top: 20px;
-  /* Massive padding to allow 670px popups to escape visually */
-  padding-bottom: 560px;
-  margin-bottom: -520px;
+  padding-bottom: 380px;
+  margin-bottom: -340px;
   scroll-behavior: smooth;
 }
 
@@ -81,8 +79,8 @@ body {
   left: 50%;
   transform: translateX(-50%) scale(0.86);
   transform-origin: top center;
-  background-color: #1a242f;
-  border-radius: 10px;
+  background-color: #000000;
+  border-radius: 8px;
   z-index: 10000;
   opacity: 0;
   visibility: hidden;
@@ -101,17 +99,16 @@ body {
   flex-direction: column;
 }
 
-/* Normal Card Popup (596x670) */
+/* Normal Card Popup (Width: 422px, Height: 493px) */
 .hover-popup.normal-popup {
-  width: 596px;
-  height: 670px;
+  width: 422px;
+  height: 493px;
 }
 
-/* Large Banner Popup (Extends to 985x554) */
+/* Large Banner Popup */
 .hover-popup.large-popup {
   width: 985px;
   height: 554px;
-  /* Adjusting top anchor so it centers better over the 584px tall card */
   top: 15px; 
 }
 
@@ -146,11 +143,6 @@ body {
   transform: translateX(0) scale(1);
 }
 
-/* ─── GLOBAL SMOOTH SCROLLING ────────────────────────────────────────────── */
 * {
   scroll-behavior: smooth;
-}
-
-button, a, [role="button"] {
-  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
