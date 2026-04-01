@@ -73,7 +73,11 @@ function ScrollArrow({ dir, onClick, visible }) {
           animate={{ opacity: 1, scale: 1, x: 0 }}
           exit={{ opacity: 0, scale: 0.8, x: dir === 'left' ? -8 : 8 }}
           transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          onClick={e => { e.stopPropagation(); onClick() }}
+          onClick={e => { 
+            e.preventDefault(); 
+            e.stopPropagation(); 
+            onClick(); 
+          }}
           className={`
             pointer-events-auto
             w-10 h-10 md:w-12 md:h-12 rounded-full
@@ -189,8 +193,8 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
 
       <div className="relative">
         
-        {/* Absolute Wrapper for Fades and Arrows — locked strictly to card height to avoid covering popups */}
-        <div className={`absolute left-0 right-0 top-[20px] pointer-events-none flex items-center justify-between z-[150] ${isLargeRow ? 'h-[240px] md:h-[300px]' : 'h-[118px] md:h-[158px]'}`}>
+        {/* Absolute Wrapper for Fades and Arrows — z-[9999] forces this above hovered popup cards */}
+        <div className={`absolute left-0 right-0 top-[20px] pointer-events-none flex items-center justify-between z-[9999] ${isLargeRow ? 'h-[240px] md:h-[300px]' : 'h-[118px] md:h-[158px]'}`}>
           
           {/* Left edge fade */}
           <AnimatePresence>
@@ -212,11 +216,11 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
             )}
           </AnimatePresence>
 
-          {/* Scrolling Arrows (Only appear when hovering the entire row + can scroll in that direction) */}
-          <div className="absolute left-2 md:left-4 z-[200]">
+          {/* Scrolling Arrows */}
+          <div className="absolute left-2 md:left-4 z-[9999]">
             <ScrollArrow dir="left" onClick={() => scroll('left')} visible={canScrollL && isRowHovered} />
           </div>
-          <div className="absolute right-2 md:right-4 z-[200]">
+          <div className="absolute right-2 md:right-4 z-[9999]">
             <ScrollArrow dir="right" onClick={() => scroll('right')} visible={canScrollR && isRowHovered} />
           </div>
 
