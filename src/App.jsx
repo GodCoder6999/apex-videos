@@ -9,7 +9,7 @@ import Player from './pages/Player';
 
 function App() {
   return (
-    <div className="min-h-screen bg-[#0f171e] text-white pb-10">
+    <div className="min-h-screen bg-[#00050D] text-white pb-10">
       <Navbar />
       <Routes>
         <Route path="/" element={<Home />} />
