@@ -33,21 +33,12 @@ const fmt = s => {
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
 const LOAD_STEPS = [
-  { msg: 'Connecting to Nuvio Streams…',  delay: 0     },
-  { msg: 'Fetching metadata…',            delay: 1500  },
-  { msg: 'Scanning available sources…',   delay: 3500  },
-  { msg: 'Extracting stream URL…',        delay: 6000  },
+  { msg: 'Connecting to servers…',        delay: 0     },
+  { msg: 'Scanning stream providers…',    delay: 1500  },
+  { msg: 'Filtering unsupported formats…',delay: 3500  },
+  { msg: 'Extracting clean URL…',         delay: 6000  },
   { msg: 'Almost there…',                 delay: 10000 },
 ]
-
-async function safeJsonFetch(url) {
-  const resp = await fetch(url, { signal: AbortSignal.timeout(25000) })
-  if (!resp.ok) throw new Error(`Network response was not ok (${resp.status})`)
-  const text = await resp.text()
-  if (text.trimStart().startsWith('<'))
-    throw new Error('Server returned HTML. The stream API might be blocked or updating.')
-  return JSON.parse(text)
-}
 
 // ── SVG Icons ─────────────────────────────────────────────────────────────────
 const IconClose = () => (
@@ -133,19 +124,10 @@ const IconPause = () => (
   </svg>
 )
 
-// ── Shared styles ─────────────────────────────────────────────────────────────
 const ICON_BTN = {
-  background: 'none',
-  border: 'none',
-  color: '#fff',
-  cursor: 'pointer',
-  padding: '8px',
-  borderRadius: '50%',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  transition: 'background 0.15s',
-  position: 'relative',
+  background: 'none', border: 'none', color: '#fff', cursor: 'pointer',
+  padding: '8px', borderRadius: '50%', display: 'flex', alignItems: 'center',
+  justifyContent: 'center', transition: 'background 0.15s', position: 'relative',
 }
 
 export default function Player() {
@@ -178,25 +160,20 @@ export default function Player() {
   const [subTracks,     setSubTracks]     = useState([])
   const [activeSub,     setActiveSub]     = useState(-1)
 
-  // UI visibility
+  // UI state
   const [showUI,        setShowUI]        = useState(true)
-
-  // Panel state: null | 'settings' | 'audio' | 'quality' | 'subtitles' | 'speed' | 'volume'
   const [openPanel,     setOpenPanel]     = useState(null)
-
-  // Load/error state
   const [loadState,     setLoadState]     = useState('loading')
   const [errorMsg,      setErrorMsg]      = useState('')
   const [srcLabel,      setSrcLabel]      = useState('')
   const [loadStep,      setLoadStep]      = useState(LOAD_STEPS[0].msg)
   const [loadProgress,  setLoadProgress]  = useState(0)
 
-  // Title
+  // Title info
   const [title,         setTitle]         = useState('')
   const [season]  = useState(1)
   const [episode] = useState(1)
 
-  // Fetch title
   useEffect(() => {
     fetch(`${BASE_URL}/${type}/${id}?api_key=${API_KEY}&language=en-US`)
       .then(r => r.json())
@@ -204,7 +181,6 @@ export default function Player() {
       .catch(() => {})
   }, [type, id])
 
-  // Auto-hide controls
   const resetHide = useCallback(() => {
     setShowUI(true)
     clearTimeout(hideTimer.current)
@@ -268,35 +244,74 @@ export default function Player() {
         }
       } catch (_) {}
 
-      // 2. Fetch stream list from Nuvio 
       const stremioType = type === 'tv' ? 'series' : 'movie'
-      const nuvioUrl = `https://nuviostreams.hayd.uk/stream/${stremioType}/${streamId}.json`
-      const json = await safeJsonFetch(nuvioUrl)
+      
+      // ──────────────────────────────────────────────────────────────────
+      // FIX: WATERFALL PROVIDER STRATEGY
+      // Replaces Nuvio single-point-of-failure. Instantly falls back 
+      // to another addon if one crashes or returns 401 Unauthorized.
+      // ──────────────────────────────────────────────────────────────────
+      const ADDONS = [
+        'https://stremify.hayd.uk',
+        'https://webstreamr.hayd.uk',
+        'https://nuviostreams.hayd.uk',
+        'https://nodebrid.fly.dev'
+      ]
+
+      let json = null
+
+      for (const base of ADDONS) {
+        try {
+          const targetUrl = `${base}/stream/${stremioType}/${streamId}.json`
+          // FIX: Wrap the JSON fetch in our proxy so the browser doesn't trigger CORS blocks
+          const proxyUrl  = `/api/proxy?url=${encodeURIComponent(targetUrl)}`
+          
+          const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) })
+          if (!resp.ok) continue // If 401 Unauthorized or 500 Error, instantly try next addon
+          
+          const text = await resp.text()
+          if (text.trimStart().startsWith('<')) continue // Skip if it returned an HTML error page
+
+          const data = JSON.parse(text)
+          
+          // Pre-filter: Make sure this addon actually has playable files (not just MKV)
+          const hasPlayable = (data?.streams || []).some(s => {
+              if (!s.url) return false
+              const u = s.url.toLowerCase()
+              const t = (s.title || '').toLowerCase()
+              if (u.includes('.mkv') || t.includes('mkv')) return false
+              if (t.includes('hevc') || t.includes('x265') || t.includes('h265')) return false
+              return true
+          })
+
+          if (hasPlayable) {
+            json = data
+            break // Found working streams! Break the loop immediately.
+          }
+        } catch (err) {
+          console.warn(`Addon ${base} failed or timed out:`, err)
+        }
+      }
+
       stepTimers.current.forEach(clearTimeout)
 
+      if (!json?.streams?.length) {
+        throw new Error('All free stream providers are currently rate-limited or unavailable. Please try again later.')
+      }
+
       // ──────────────────────────────────────────────────────────────────
-      // FIX: STRICT STREAM FILTERING (NO MKV ALLOWED)
-      // Because we cannot transcode on Vercel, we MUST filter out MKVs 
-      // and HEVC files entirely. We only keep standard mp4 and m3u8 files.
+      // STRICT FILTERING: Remove browser-crashing formats
       // ──────────────────────────────────────────────────────────────────
-      const validStreams = (json?.streams || []).filter(s => {
+      const validStreams = json.streams.filter(s => {
         if (!s.url) return false
-        
         const url = s.url.toLowerCase()
         const streamTitle = (s.title || '').toLowerCase()
 
-        // 1. Reject MKV completely
         if (url.includes('.mkv') || streamTitle.includes('mkv')) return false
-        
-        // 2. Reject HEVC / H265 / x265 completely (Browsers can't decode it)
         if (streamTitle.includes('hevc') || streamTitle.includes('x265') || streamTitle.includes('h265')) return false
         
         return true
       })
-
-      if (!validStreams.length) {
-        throw new Error('No browser-compatible streams found. (Available streams are in unsupported MKV or HEVC formats).')
-      }
 
       // Sort to prioritize .m3u8 playlists over direct .mp4 files
       validStreams.sort((a, b) => {
@@ -315,7 +330,7 @@ export default function Player() {
         
       source = stream.name
         ? `${stream.name}${stream.title ? ' · ' + stream.title.split('\n')[0] : ''}`
-        : 'Nuvio Streams'
+        : 'Auto Selected'
 
     } catch (e) {
       stepTimers.current.forEach(clearTimeout)
@@ -368,7 +383,6 @@ export default function Player() {
     })
 
     hlsRef.current = hls
-
     hls.attachMedia(video2)
 
     hls.on(Hls.Events.MEDIA_ATTACHED, () => {
