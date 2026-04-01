@@ -136,7 +136,6 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
               exit={{ opacity: 0 }}
               onClick={() => scroll('left')}
               className="absolute left-0 top-0 bottom-0 z-40 w-12 md:w-16 flex items-center justify-center bg-gradient-to-r from-[#0f171e] to-transparent hover:from-[#0f171e]/95 transition-all group/arrow"
-              style={{ marginTop: '28px' }}
             >
               <motion.div
                 whileHover={{ scale: 1.15 }}
@@ -158,7 +157,6 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
               exit={{ opacity: 0 }}
               onClick={() => scroll('right')}
               className="absolute right-0 top-0 bottom-0 z-40 w-12 md:w-16 flex items-center justify-center bg-gradient-to-l from-[#0f171e] to-transparent hover:from-[#0f171e]/95 transition-all group/arrow"
-              style={{ marginTop: '28px' }}
             >
               <motion.div
                 whileHover={{ scale: 1.15 }}
@@ -171,12 +169,13 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
           )}
         </AnimatePresence>
 
-        {/* Scrollable row */}
+        {/* Scrollable row — overflow-y: visible lets popups escape */}
         <div
           ref={rowRef}
-          className="flex gap-4 overflow-x-scroll scrollbar-hide px-4 md:px-10 py-5"
+          className="row-scroll-outer px-4 md:px-10"
           style={{ scrollSnapType: 'x mandatory' }}
         >
+        <div className="movie-row">
           {movies.map((movie, i) => {
             if (!movie.poster_path || !movie.backdrop_path) return null
             const type = movie.media_type || (movie.first_air_date ? 'tv' : 'movie')
@@ -263,7 +262,8 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
               </motion.div>
             )
           })}
-        </div>
+        </div> {/* end .movie-row */}
+        </div> {/* end .row-scroll-outer */}
       </div>
     </div>
   )
