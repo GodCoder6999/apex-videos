@@ -2,11 +2,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import {
-  ChevronLeft, Play, Pause, Volume2, VolumeX,
-  Maximize, Minimize, Settings, RefreshCw,
-  SkipBack, SkipForward, AlertCircle, Languages, Gauge
-} from 'lucide-react'
+import { RefreshCw, AlertCircle, Maximize, Minimize } from 'lucide-react'
 
 const BASE_URL = 'https://api.themoviedb.org/3'
 const API_KEY  = import.meta.env.VITE_TMDB_API_KEY
@@ -27,36 +23,130 @@ function loadHls() {
 }
 
 const fmt = s => {
-  if (!s || isNaN(s)) return '0:00'
+  if (!s || isNaN(s) || s === Infinity) return '0:00'
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60)
   return h > 0
     ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
     : `${m}:${String(sec).padStart(2,'0')}`
 }
+
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
+const LOAD_STEPS = [
+  { msg: 'Connecting to Nuvio Streams…',  delay: 0     },
+  { msg: 'Fetching metadata…',            delay: 1500  },
+  { msg: 'Scanning available sources…',   delay: 3500  },
+  { msg: 'Extracting stream URL…',        delay: 6000  },
+  { msg: 'Almost there…',                 delay: 10000 },
+]
+
 async function safeJsonFetch(url) {
-  const resp = await fetch(url, { signal: AbortSignal.timeout(20000) })
+  const resp = await fetch(url, { signal: AbortSignal.timeout(25000) })
   if (!resp.ok) throw new Error(`Network response was not ok (${resp.status})`)
   const text = await resp.text()
-  if (text.trimStart().startsWith('<')) {
+  if (text.trimStart().startsWith('<'))
     throw new Error('Server returned HTML. The stream API might be blocked or updating.')
-  }
   return JSON.parse(text)
 }
 
-// ── Smooth spring config ──────────────────────────────────────────────────────
-const spring = { type: 'spring', stiffness: 340, damping: 28 }
-const ease   = { duration: 0.35, ease: [0.22, 1, 0.36, 1] }
+// ── SVG Icons ─────────────────────────────────────────────────────────────────
+const IconClose = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{width:20,height:20}}>
+    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+  </svg>
+)
+const IconCC = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:22,height:22}}>
+    <rect x="2" y="5" width="20" height="15" rx="2"/>
+    <line x1="6" y1="12" x2="18" y2="12"/><line x1="6" y1="16" x2="14" y2="16"/>
+  </svg>
+)
+const IconVolume = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:22,height:22}}>
+    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+  </svg>
+)
+const IconVolumeMute = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:22,height:22}}>
+    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+    <line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+  </svg>
+)
+const IconPiP = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:22,height:22}}>
+    <rect x="2" y="4" width="20" height="16" rx="2"/>
+    <rect x="12" y="12" width="8" height="6" rx="1" fill="currentColor" stroke="none"/>
+  </svg>
+)
+const IconFullscreen = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:22,height:22}}>
+    <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+    <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+  </svg>
+)
+const IconFullscreenExit = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:22,height:22}}>
+    <polyline points="8 3 3 3 3 8"/><polyline points="21 8 21 3 16 3"/>
+    <polyline points="3 16 3 21 8 21"/><polyline points="16 21 21 21 21 16"/>
+  </svg>
+)
+const IconMore = () => (
+  <svg viewBox="0 0 24 24" fill="currentColor" style={{width:22,height:22}}>
+    <circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/>
+  </svg>
+)
+const IconChevronRight = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{width:14,height:14}}>
+    <polyline points="9 18 15 12 9 6"/>
+  </svg>
+)
+const IconChevronLeft = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{width:18,height:18}}>
+    <polyline points="15 18 9 12 15 6"/>
+  </svg>
+)
+const IconSkipBack = () => (
+  <svg viewBox="0 0 44 44" fill="none" style={{width:36,height:36}}>
+    <path d="M28 10.5A14 14 0 1 0 36 22" stroke="white" strokeWidth="2.2" strokeLinecap="round"/>
+    <polyline points="28,4 28,11 35,11" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    <text x="22" y="27" textAnchor="middle" fill="white" fontSize="9.5" fontFamily="Arial" fontWeight="700">10</text>
+  </svg>
+)
+const IconSkipFwd = () => (
+  <svg viewBox="0 0 44 44" fill="none" style={{width:36,height:36}}>
+    <path d="M16 10.5A14 14 0 1 1 8 22" stroke="white" strokeWidth="2.2" strokeLinecap="round"/>
+    <polyline points="16,4 16,11 9,11" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    <text x="22" y="27" textAnchor="middle" fill="white" fontSize="9.5" fontFamily="Arial" fontWeight="700">10</text>
+  </svg>
+)
+const IconPlay = () => (
+  <svg viewBox="0 0 24 24" fill="currentColor" style={{width:24,height:24}}>
+    <polygon points="6,3 20,12 6,21"/>
+  </svg>
+)
+const IconPause = () => (
+  <svg viewBox="0 0 24 24" fill="currentColor" style={{width:24,height:24}}>
+    <rect x="5" y="3" width="4" height="18" rx="1"/>
+    <rect x="15" y="3" width="4" height="18" rx="1"/>
+  </svg>
+)
 
-// Load steps with timing hints
-const LOAD_STEPS = [
-  { msg: 'Connecting to Nuvio Streams…',  delay: 0    },
-  { msg: 'Fetching metadata…',            delay: 1500 },
-  { msg: 'Scanning available sources…',   delay: 3000 },
-  { msg: 'Extracting stream…',            delay: 6000 },
-  { msg: 'Almost there…',                 delay: 10000 },
-]
+// ── Shared styles ─────────────────────────────────────────────────────────────
+const ICON_BTN = {
+  background: 'none',
+  border: 'none',
+  color: '#fff',
+  cursor: 'pointer',
+  padding: '8px',
+  borderRadius: '50%',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  transition: 'background 0.15s',
+  position: 'relative',
+}
 
 export default function Player() {
   const { type = 'movie', id } = useParams()
@@ -65,54 +155,80 @@ export default function Player() {
   const videoRef     = useRef(null)
   const hlsRef       = useRef(null)
   const containerRef = useRef(null)
-  const seekRef      = useRef(null)
+  const seekTrackRef = useRef(null)
   const hideTimer    = useRef(null)
   const stepTimers   = useRef([])
 
+  // Playback state
   const [playing,       setPlaying]       = useState(false)
   const [muted,         setMuted]         = useState(false)
-  const [volume,        setVolume]        = useState(1)
+  const [volume,        setVolume]        = useState(0.8)
   const [current,       setCurrent]       = useState(0)
   const [duration,      setDuration]      = useState(0)
   const [buffered,      setBuffered]      = useState(0)
   const [fullscreen,    setFullscreen]    = useState(false)
   const [speed,         setSpeed]         = useState(1)
+  const [isBuffering,   setIsBuffering]   = useState(false)
+
+  // Track lists
   const [audioTracks,   setAudioTracks]   = useState([])
   const [activeAudio,   setActiveAudio]   = useState(-1)
   const [qualities,     setQualities]     = useState([])
   const [activeQuality, setActiveQuality] = useState(-1)
   const [subTracks,     setSubTracks]     = useState([])
   const [activeSub,     setActiveSub]     = useState(-1)
+
+  // UI visibility
   const [showUI,        setShowUI]        = useState(true)
-  const [showPanel,     setShowPanel]     = useState(false)
-  const [panelTab,      setPanelTab]      = useState('audio')
-  const [loadState,     setLoadState]     = useState('loading') 
+
+  // Panel state: null | 'settings' | 'audio' | 'quality' | 'subtitles' | 'speed' | 'volume'
+  const [openPanel,     setOpenPanel]     = useState(null)
+
+  // Load/error state
+  const [loadState,     setLoadState]     = useState('loading')
   const [errorMsg,      setErrorMsg]      = useState('')
   const [srcLabel,      setSrcLabel]      = useState('')
   const [loadStep,      setLoadStep]      = useState(LOAD_STEPS[0].msg)
   const [loadProgress,  setLoadProgress]  = useState(0)
-  const [isBuffering,   setIsBuffering]   = useState(false)
 
+  // Title
+  const [title,         setTitle]         = useState('')
   const [season]  = useState(1)
   const [episode] = useState(1)
 
+  // Fetch title
+  useEffect(() => {
+    fetch(`${BASE_URL}/${type}/${id}?api_key=${API_KEY}&language=en-US`)
+      .then(r => r.json())
+      .then(d => setTitle(d.title || d.name || ''))
+      .catch(() => {})
+  }, [type, id])
+
+  // Auto-hide controls
   const resetHide = useCallback(() => {
     setShowUI(true)
     clearTimeout(hideTimer.current)
-    hideTimer.current = setTimeout(() => { setShowUI(false); setShowPanel(false) }, 4000)
+    hideTimer.current = setTimeout(() => {
+      setShowUI(false)
+      setOpenPanel(null)
+    }, 4500)
   }, [])
 
-  useEffect(() => { resetHide(); return () => clearTimeout(hideTimer.current) }, [resetHide])
+  useEffect(() => {
+    resetHide()
+    return () => clearTimeout(hideTimer.current)
+  }, [resetHide])
 
+  // ── Boot: fetch stream & setup HLS ─────────────────────────────────────────
   const boot = useCallback(async () => {
     setLoadState('loading')
     setSrcLabel('')
     setLoadStep(LOAD_STEPS[0].msg)
     setLoadProgress(0)
+    setOpenPanel(null)
     stepTimers.current.forEach(clearTimeout)
     stepTimers.current = []
-    
-    // Clear old tracks
+
     setAudioTracks([])
     setActiveAudio(-1)
     setQualities([])
@@ -121,51 +237,51 @@ export default function Player() {
     setActiveSub(-1)
 
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
-    if (videoRef.current) videoRef.current.src = ''
+    const video = videoRef.current
+    if (video) {
+      video.removeAttribute('src')
+      video.load()
+    }
 
-    // Animate through load steps
+    // Animate load steps
     LOAD_STEPS.forEach(({ msg, delay }, i) => {
       const t = setTimeout(() => {
         setLoadStep(msg)
-        setLoadProgress((i / (LOAD_STEPS.length - 1)) * 80)
+        setLoadProgress(Math.round((i / (LOAD_STEPS.length - 1)) * 75))
       }, delay)
       stepTimers.current.push(t)
     })
 
     let m3u8, source
     try {
-      // 1. Get IMDB ID 
-      let streamId = `tmdb:${id}`
+      // 1. Resolve stream ID
+      let streamId = type === 'tv' ? `tmdb:${id}:${season}:${episode}` : `tmdb:${id}`
       try {
-         const tmdbUrl = `${BASE_URL}/${type}/${id}/external_ids?api_key=${API_KEY}`
-         const extRes = await fetch(tmdbUrl)
-         if (extRes.ok) {
-           const extData = await extRes.json()
-           if (extData.imdb_id) {
-               streamId = type === 'tv' ? `${extData.imdb_id}:${season}:${episode}` : extData.imdb_id
-           } else if (type === 'tv') {
-               streamId = `tmdb:${id}:${season}:${episode}`
-           }
-         }
-      } catch (e) {
-         if (type === 'tv') streamId = `tmdb:${id}:${season}:${episode}`
-      }
+        const extRes = await fetch(`${BASE_URL}/${type}/${id}/external_ids?api_key=${API_KEY}`)
+        if (extRes.ok) {
+          const extData = await extRes.json()
+          if (extData.imdb_id) {
+            streamId = type === 'tv'
+              ? `${extData.imdb_id}:${season}:${episode}`
+              : extData.imdb_id
+          }
+        }
+      } catch (_) {}
 
-      // 2. Fetch Streams 
+      // 2. Fetch stream list from Nuvio
       const nuvioUrl = `https://nuviostreams.hayd.uk/stream/${type}/${streamId}.json`
       const json = await safeJsonFetch(nuvioUrl)
       stepTimers.current.forEach(clearTimeout)
 
-      if (!json || !json.streams || !json.streams.length) {
-         throw new Error('No streams found on Nuvio for this title.')
-      }
+      if (!json?.streams?.length) throw new Error('No streams found for this title.')
 
-      // 3. Find playable stream
       const stream = json.streams.find(s => s.url)
       if (!stream) throw new Error('No playable stream URL found.')
 
-      m3u8 = stream.url
-      source = stream.name ? `${stream.name} - ${stream.title?.split('\n')[0] || 'Auto'}` : 'Nuvio Streams'
+      m3u8   = stream.url
+      source = stream.name
+        ? `${stream.name}${stream.title ? ' · ' + stream.title.split('\n')[0] : ''}`
+        : 'Nuvio Streams'
 
     } catch (e) {
       stepTimers.current.forEach(clearTimeout)
@@ -175,86 +291,119 @@ export default function Player() {
     }
 
     setSrcLabel(source)
-    setLoadProgress(90)
+    setLoadProgress(85)
     setLoadStep('Initializing player…')
 
     const Hls   = await loadHls()
-    const video = videoRef.current
-    if (!video) return
+    const video2 = videoRef.current
+    if (!video2) return
 
-    const isM3U8 = m3u8.includes('.m3u8')
+    const isM3U8 = /\.m3u8/i.test(m3u8)
 
-    // Native Fallback
+    // ── Native fallback (Safari / no HLS support) ───────────────────────────
     if (!isM3U8 || !Hls || !Hls.isSupported()) {
-      video.src = m3u8
-      video.play().catch(() => setPlaying(false))
+      video2.src = m3u8
       setLoadState('playing')
       setLoadProgress(100)
+      video2.play().catch(() => setPlaying(false))
       return
     }
 
-    // Connect to HLS
+    // ── HLS.js path ─────────────────────────────────────────────────────────
     const hls = new Hls({
-      enableWorker: true,
-      manifestLoadingMaxRetry: 4,
-      levelLoadingMaxRetry: 4,
-      fragLoadingMaxRetry: 6,
-      startLevel: -1,
+      enableWorker:             true,
+      lowLatencyMode:           false,
+      backBufferLength:         90,
+      maxBufferLength:          60,
+      maxMaxBufferLength:       600,
+      startLevel:               -1,       // auto quality
+      manifestLoadingMaxRetry:  4,
+      levelLoadingMaxRetry:     4,
+      fragLoadingMaxRetry:      6,
+      xhrSetup: xhr => {
+        xhr.withCredentials = false
+      },
     })
-    
+
     hlsRef.current = hls
 
-    // Fix 1: Attach media FIRST, then load source on MEDIA_ATTACHED
-    hls.attachMedia(video)
+    hls.attachMedia(video2)
+
     hls.on(Hls.Events.MEDIA_ATTACHED, () => {
       hls.loadSource(m3u8)
     })
 
     hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
-      setQualities([
+      // Quality levels
+      const qs = [
         { id: -1, label: 'Auto' },
-        ...data.levels.map((l, i) => ({ id: i, label: l.height ? `${l.height}p` : `Level ${i+1}` })),
-      ])
+        ...data.levels.map((l, i) => ({
+          id: i,
+          label: l.height ? `${l.height}p` : `Level ${i + 1}`,
+          bitrate: l.bitrate,
+        })),
+      ]
+      setQualities(qs)
       setActiveQuality(-1)
 
+      // Audio tracks
       const at = hls.audioTracks || []
-      if (at.length) {
-        setAudioTracks(at.map((t, i) => ({ id: i, label: t.name || t.lang || `Track ${i+1}` })))
-        // Fix 3: Ensure a default audio track is selected in the UI
-        setActiveAudio(hls.audioTrack !== -1 ? hls.audioTrack : 0)
+      if (at.length > 0) {
+        const mapped = at.map((t, i) => ({
+          id:    i,
+          label: t.name || t.lang || `Track ${i + 1}`,
+          lang:  t.lang || '',
+        }))
+        setAudioTracks(mapped)
+        // Pick default track (first enabled or 0)
+        const defIdx = at.findIndex(t => t.default) !== -1
+          ? at.findIndex(t => t.default) : 0
+        setActiveAudio(defIdx)
+        hls.audioTrack = defIdx
       }
-      
+
+      // Subtitle tracks
       const st = hls.subtitleTracks || []
-      setSubTracks([{ id: -1, label: 'Off' }, ...st.map((t, i) => ({ id: i, label: t.name || t.lang || `Sub ${i+1}` }))])
+      setSubTracks([
+        { id: -1, label: 'Off' },
+        ...st.map((t, i) => ({ id: i, label: t.name || t.lang || `Sub ${i + 1}` })),
+      ])
+      setActiveSub(-1)
+      hls.subtitleDisplay = false
 
       setLoadState('playing')
       setLoadProgress(100)
-      video.play().catch(() => setPlaying(false))
+      video2.play().catch(() => setPlaying(false))
     })
 
     hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_, d) => {
-      setAudioTracks(d.audioTracks.map((t, i) => ({ id: i, label: t.name || t.lang || `Track ${i+1}` })))
+      const mapped = (d.audioTracks || []).map((t, i) => ({
+        id:    i,
+        label: t.name || t.lang || `Track ${i + 1}`,
+        lang:  t.lang || '',
+      }))
+      setAudioTracks(mapped)
     })
-    
+
     hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_, d) => {
       setActiveAudio(d.id)
     })
 
+    hls.on(Hls.Events.LEVEL_SWITCHED, (_, d) => {
+      if (hls.autoLevelEnabled) setActiveQuality(-1)
+      else setActiveQuality(d.level)
+    })
+
     hls.on(Hls.Events.ERROR, (_, d) => {
-      if (d.fatal) {
-        if (d.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          hls.startLoad()
-        } else {
-          setLoadState('error')
-          setErrorMsg('Stream error. The source may have expired — click Retry.')
-        }
+      if (!d.fatal) return
+      if (d.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        hls.startLoad()
+      } else {
+        setLoadState('error')
+        setErrorMsg('A fatal stream error occurred. Please retry.')
       }
     })
 
-    // Buffering detection
-    video.addEventListener('waiting', () => setIsBuffering(true))
-    video.addEventListener('playing', () => setIsBuffering(false))
-    video.addEventListener('canplay', () => setIsBuffering(false))
   }, [type, id, season, episode])
 
   useEffect(() => {
@@ -265,106 +414,249 @@ export default function Player() {
     }
   }, [boot])
 
+  // ── Video event listeners ──────────────────────────────────────────────────
   useEffect(() => {
-    const v = videoRef.current; if (!v) return
-    const handlers = {
-      play:           () => setPlaying(true),
-      pause:          () => setPlaying(false),
-      timeupdate:     () => {
-        setCurrent(v.currentTime)
-        if (v.buffered.length) setBuffered(v.buffered.end(v.buffered.length - 1))
-      },
-      loadedmetadata: () => {
-        setDuration(v.duration)
-        if (!hlsRef.current && v.audioTracks && v.audioTracks.length > 0) {
-          const tracks = [];
-          for (let i = 0; i < v.audioTracks.length; i++) {
-            tracks.push({ id: i, label: v.audioTracks[i].label || v.audioTracks[i].language || `Track ${i+1}` });
-          }
-          setAudioTracks(tracks);
-          for (let i = 0; i < v.audioTracks.length; i++) {
-             if (v.audioTracks[i].enabled) { setActiveAudio(i); break; }
-          }
-        }
-      },
-      durationchange: () => setDuration(v.duration),
-      volumechange:   () => { setVolume(v.volume); setMuted(v.muted) },
-    }
-    Object.entries(handlers).forEach(([e, fn]) => v.addEventListener(e, fn))
-    return () => Object.entries(handlers).forEach(([e, fn]) => v.removeEventListener(e, fn))
-  }, [])
+    const v = videoRef.current
+    if (!v) return
 
+    const onPlay      = () => setPlaying(true)
+    const onPause     = () => setPlaying(false)
+    const onTimeUpdate = () => {
+      setCurrent(v.currentTime)
+      if (v.buffered.length)
+        setBuffered(v.buffered.end(v.buffered.length - 1))
+    }
+    const onLoadedMeta = () => {
+      setDuration(v.duration)
+      v.volume = volume
+      // Native audio tracks (Safari)
+      if (!hlsRef.current && v.audioTracks?.length > 0) {
+        const tracks = Array.from(v.audioTracks).map((t, i) => ({
+          id: i, label: t.label || t.language || `Track ${i + 1}`, lang: t.language || '',
+        }))
+        setAudioTracks(tracks)
+        const defIdx = Array.from(v.audioTracks).findIndex(t => t.enabled)
+        setActiveAudio(defIdx !== -1 ? defIdx : 0)
+      }
+    }
+    const onDurationChange = () => setDuration(v.duration)
+    const onVolumeChange   = () => { setVolume(v.volume); setMuted(v.muted) }
+    const onWaiting        = () => setIsBuffering(true)
+    const onPlaying        = () => setIsBuffering(false)
+    const onCanPlay        = () => setIsBuffering(false)
+
+    v.addEventListener('play',           onPlay)
+    v.addEventListener('pause',          onPause)
+    v.addEventListener('timeupdate',     onTimeUpdate)
+    v.addEventListener('loadedmetadata', onLoadedMeta)
+    v.addEventListener('durationchange', onDurationChange)
+    v.addEventListener('volumechange',   onVolumeChange)
+    v.addEventListener('waiting',        onWaiting)
+    v.addEventListener('playing',        onPlaying)
+    v.addEventListener('canplay',        onCanPlay)
+
+    return () => {
+      v.removeEventListener('play',           onPlay)
+      v.removeEventListener('pause',          onPause)
+      v.removeEventListener('timeupdate',     onTimeUpdate)
+      v.removeEventListener('loadedmetadata', onLoadedMeta)
+      v.removeEventListener('durationchange', onDurationChange)
+      v.removeEventListener('volumechange',   onVolumeChange)
+      v.removeEventListener('waiting',        onWaiting)
+      v.removeEventListener('playing',        onPlaying)
+      v.removeEventListener('canplay',        onCanPlay)
+    }
+  }, []) // eslint-disable-line
+
+  // Fullscreen change
   useEffect(() => {
     const fn = () => setFullscreen(!!document.fullscreenElement)
     document.addEventListener('fullscreenchange', fn)
     return () => document.removeEventListener('fullscreenchange', fn)
   }, [])
 
+  // Keyboard shortcuts
   useEffect(() => {
     const onKey = e => {
       if (['INPUT','TEXTAREA'].includes(e.target.tagName)) return
-      const v = videoRef.current; if (!v) return
-      const actions = {
-        ' ':          () => { e.preventDefault(); v.paused ? v.play() : v.pause() },
-        'k':          () => v.paused ? v.play() : v.pause(),
-        'ArrowRight': () => { e.preventDefault(); v.currentTime = Math.min(duration, v.currentTime + 10) },
-        'ArrowLeft':  () => { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 10) },
-        'ArrowUp':    () => { e.preventDefault(); v.volume = Math.min(1, v.volume + 0.1) },
-        'ArrowDown':  () => { e.preventDefault(); v.volume = Math.max(0, v.volume - 0.1) },
-        'm':          () => { v.muted = !v.muted },
-        'f':          () => document.fullscreenElement ? document.exitFullscreen() : containerRef.current?.requestFullscreen(),
+      const v = videoRef.current
+      if (!v) return
+      if (e.key === ' ' || e.key === 'k') {
+        e.preventDefault()
+        v.paused ? v.play() : v.pause()
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        v.currentTime = Math.min(duration, v.currentTime + 10)
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        v.currentTime = Math.max(0, v.currentTime - 10)
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        v.volume = Math.min(1, v.volume + 0.1)
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        v.volume = Math.max(0, v.volume - 0.1)
+      } else if (e.key === 'm') {
+        v.muted = !v.muted
+      } else if (e.key === 'f') {
+        toggleFs()
       }
-      actions[e.key]?.()
       resetHide()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [duration, resetHide])
+  }, [duration, resetHide]) // eslint-disable-line
 
-  const togglePlay = () => { const v = videoRef.current; if (!v) return; v.paused ? v.play() : v.pause(); resetHide() }
-  const toggleMute = () => { const v = videoRef.current; if (!v) return; v.muted = !v.muted }
-  const setVol     = val => { const v = videoRef.current; if (!v) return; v.volume = val; v.muted = val === 0 }
-  const toggleFs   = () => document.fullscreenElement ? document.exitFullscreen() : containerRef.current?.requestFullscreen()
-  const setSpeedFn = r => { if (videoRef.current) videoRef.current.playbackRate = r; setSpeed(r) }
-  const switchQ    = i => { if (hlsRef.current) hlsRef.current.currentLevel = i; setActiveQuality(i) }
-  const switchSub  = i => { if (hlsRef.current) { hlsRef.current.subtitleTrack = i; hlsRef.current.subtitleDisplay = i !== -1 }; setActiveSub(i) }
-
-  const switchAudio = i => { 
-    if (hlsRef.current) {
-      hlsRef.current.audioTrack = i; 
-      setActiveAudio(i);
-    } else if (videoRef.current && videoRef.current.audioTracks) {
-      for (let j = 0; j < videoRef.current.audioTracks.length; j++) {
-        videoRef.current.audioTracks[j].enabled = (j === i);
-      }
-      setActiveAudio(i);
-    }
+  // ── Controls ───────────────────────────────────────────────────────────────
+  const togglePlay = () => {
+    const v = videoRef.current; if (!v) return
+    v.paused ? v.play() : v.pause()
+    resetHide()
   }
-
-  const seek = e => {
-    const bar = seekRef.current; if (!bar || !duration) return
+  const toggleMute = () => {
+    const v = videoRef.current; if (!v) return
+    v.muted = !v.muted
+  }
+  const setVol = val => {
+    const v = videoRef.current; if (!v) return
+    const n = Math.max(0, Math.min(1, val))
+    v.volume = n
+    if (n === 0) v.muted = true
+    else if (v.muted) v.muted = false
+  }
+  const toggleFs = () => {
+    if (document.fullscreenElement) document.exitFullscreen()
+    else containerRef.current?.requestFullscreen()
+  }
+  const seekTo = e => {
+    const bar = seekTrackRef.current; if (!bar || !duration) return
     const { left, width } = bar.getBoundingClientRect()
     const pct = Math.max(0, Math.min(1, (e.clientX - left) / width))
     if (videoRef.current) videoRef.current.currentTime = pct * duration
+    resetHide()
+  }
+
+  // ── Audio / Quality / Sub switching ────────────────────────────────────────
+  const switchAudio = id => {
+    const hls = hlsRef.current
+    const v   = videoRef.current
+    if (hls) {
+      hls.audioTrack = id
+      setActiveAudio(id)
+    } else if (v?.audioTracks) {
+      for (let i = 0; i < v.audioTracks.length; i++)
+        v.audioTracks[i].enabled = (i === id)
+      setActiveAudio(id)
+    }
+  }
+  const switchQuality = id => {
+    const hls = hlsRef.current; if (!hls) return
+    hls.currentLevel = id
+    hls.autoLevelEnabled = id === -1
+    setActiveQuality(id)
+  }
+  const switchSub = id => {
+    const hls = hlsRef.current; if (!hls) return
+    if (id === -1) {
+      hls.subtitleDisplay = false
+      hls.subtitleTrack   = -1
+    } else {
+      hls.subtitleTrack   = id
+      hls.subtitleDisplay = true
+    }
+    setActiveSub(id)
+  }
+  const setSpeedFn = r => {
+    if (videoRef.current) videoRef.current.playbackRate = r
+    setSpeed(r)
   }
 
   const pctPlayed   = duration ? (current  / duration) * 100 : 0
   const pctBuffered = duration ? (buffered / duration) * 100 : 0
+  const volPct      = muted ? 0 : volume * 100
+
+  // ── Colours ────────────────────────────────────────────────────────────────
+  const C = {
+    bg:          '#000',
+    panelBg:     '#1a1d21',
+    panelBorder: '#2e3239',
+    accent:      '#1a98ff',
+    textSec:     '#8b8f97',
+    hover:       'rgba(255,255,255,0.08)',
+    active:      'rgba(255,255,255,0.12)',
+  }
+
+  // ── Radio circle ───────────────────────────────────────────────────────────
+  const RadioCircle = ({ selected }) => (
+    <div style={{
+      width:30, height:30, minWidth:30,
+      border: `2px solid ${selected ? C.accent : C.textSec}`,
+      borderRadius: '50%',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: selected ? C.accent : 'transparent',
+      transition: 'border-color 0.15s, background 0.15s',
+      flexShrink: 0,
+    }}>
+      {selected && <div style={{width:10,height:10,background:'#fff',borderRadius:'50%'}}/>}
+    </div>
+  )
+
+  // ── Panel helpers ──────────────────────────────────────────────────────────
+  const panelStyle = {
+    position:'absolute', top:56, right:16,
+    width:320, background:C.panelBg,
+    borderRadius:8, overflow:'hidden',
+    zIndex:100, boxShadow:'0 8px 32px rgba(0,0,0,0.8)',
+  }
+  const panelHeaderStyle = {
+    display:'flex', alignItems:'center', padding:'16px 20px',
+    borderBottom:`1px solid ${C.panelBorder}`,
+    fontSize:16, fontWeight:600, gap:12,
+  }
+  const settingsRowStyle = {
+    display:'flex', alignItems:'center',
+    padding:'16px 20px', cursor:'pointer',
+    transition:'background 0.12s',
+    borderBottom:`1px solid ${C.panelBorder}`,
+    gap:16,
+  }
+  const rowLabelStyle = { flex:1, fontSize:15, fontWeight:500 }
+  const rowValueStyle = {
+    fontSize:14, color:C.textSec,
+    display:'flex', alignItems:'center', gap:4,
+  }
+  const radioOptionStyle = {
+    display:'flex', alignItems:'flex-start',
+    padding:'14px 20px', cursor:'pointer',
+    transition:'background 0.12s',
+    borderBottom:`1px solid ${C.panelBorder}`,
+    gap:14,
+  }
+
+  // ── Current labels for Settings panel ────────────────────────────────────
+  const audioLabel   = audioTracks.find(t => t.id === activeAudio)?.label  || 'Auto'
+  const qualityLabel = qualities.find(q => q.id === activeQuality)?.label  || 'Auto'
+  const subLabel     = subTracks.find(s => s.id === activeSub)?.label      || 'Off'
+  const speedLabel   = speed === 1 ? 'Normal' : `${speed}×`
 
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 bg-black z-[100] flex flex-col overflow-hidden select-none"
       onMouseMove={resetHide}
       onTouchStart={resetHide}
+      onClick={() => { if (loadState === 'playing') { togglePlay(); resetHide() } }}
+      style={{
+        position:'fixed', inset:0, background:'#000',
+        zIndex:100, display:'flex', flexDirection:'column',
+        userSelect:'none', fontFamily:"'Amazon Ember','Arial',sans-serif",
+      }}
     >
+      {/* ── VIDEO ── */}
       <video
         ref={videoRef}
-        className="w-full h-full object-contain"
+        style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'contain' }}
         playsInline
         autoPlay
-        /* Fix 2: Removed crossOrigin="anonymous" to prevent native stream blocking */
-        onClick={togglePlay}
       />
 
       {/* ── LOADING OVERLAY ── */}
@@ -372,29 +664,25 @@ export default function Player() {
         {loadState === 'loading' && (
           <motion.div
             key="loading"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, scale: 0.98 }}
-            transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-            className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6 bg-[#0a1018] px-6 text-center"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={{ duration: 0.35 }}
+            style={{
+              position:'absolute', inset:0, zIndex:20,
+              display:'flex', flexDirection:'column',
+              alignItems:'center', justifyContent:'center', gap:28,
+              background:'#0a0d12', textAlign:'center', padding:'0 24px',
+            }}
           >
             {/* Layered spinner */}
-            <div className="relative w-20 h-20">
-              <div className="absolute inset-0 rounded-full border-4 border-white/5" />
+            <div style={{position:'relative', width:72, height:72}}>
+              <div style={{position:'absolute',inset:0,borderRadius:'50%',border:'3px solid rgba(255,255,255,0.05)'}}/>
               <motion.div
-                className="absolute inset-0 rounded-full border-4 border-transparent border-t-[#00a8e1]"
-                animate={{ rotate: 360 }}
-                transition={{ duration: 0.9, repeat: Infinity, ease: 'linear' }}
+                animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease:'linear' }}
+                style={{position:'absolute',inset:0,borderRadius:'50%',border:'3px solid transparent',borderTopColor:'#1a98ff'}}
               />
               <motion.div
-                className="absolute inset-[6px] rounded-full border-4 border-transparent border-t-white/20"
-                animate={{ rotate: -360 }}
-                transition={{ duration: 1.4, repeat: Infinity, ease: 'linear' }}
-              />
-              <motion.div
-                className="absolute inset-[13px] rounded-full border-2 border-transparent border-t-[#00a8e1]/50"
-                animate={{ rotate: 360 }}
-                transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+                animate={{ rotate: -360 }} transition={{ duration: 1.5, repeat: Infinity, ease:'linear' }}
+                style={{position:'absolute',inset:8,borderRadius:'50%',border:'2px solid transparent',borderTopColor:'rgba(255,255,255,0.15)'}}
               />
             </div>
 
@@ -402,33 +690,27 @@ export default function Player() {
             <AnimatePresence mode="wait">
               <motion.div
                 key={loadStep}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                className="flex flex-col gap-1.5"
+                initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-8 }}
+                transition={{ duration:0.28 }}
               >
-                <p className="text-white font-semibold text-sm tracking-wide">{loadStep}</p>
-                <p className="text-gray-600 text-xs">Connecting securely to Nuvio…</p>
+                <p style={{color:'#fff', fontWeight:600, fontSize:14, letterSpacing:'0.02em'}}>{loadStep}</p>
+                <p style={{color:'#555', fontSize:12, marginTop:4}}>Securing connection to stream…</p>
               </motion.div>
             </AnimatePresence>
 
             {/* Progress bar */}
-            <div className="w-52 h-[3px] bg-white/8 rounded-full overflow-hidden">
+            <div style={{width:200, height:3, background:'rgba(255,255,255,0.08)', borderRadius:2, overflow:'hidden'}}>
               <motion.div
-                className="h-full bg-gradient-to-r from-[#00a8e1] to-[#0088bb] rounded-full"
-                animate={{ width: `${loadProgress}%` }}
-                transition={{ duration: 0.8, ease: 'easeOut' }}
+                animate={{ width:`${loadProgress}%` }}
+                transition={{ duration:0.7, ease:'easeOut' }}
+                style={{height:'100%', background:'linear-gradient(90deg,#1a98ff,#0070cc)', borderRadius:2}}
               />
             </div>
 
             {srcLabel && (
-              <motion.p
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="text-gray-600 text-xs"
-              >
-                via <span className="text-[#00a8e1] font-semibold">{srcLabel}</span>
-              </motion.p>
+              <p style={{color:'#444', fontSize:11}}>
+                via <span style={{color:'#1a98ff', fontWeight:600}}>{srcLabel}</span>
+              </p>
             )}
           </motion.div>
         )}
@@ -439,316 +721,569 @@ export default function Player() {
         {loadState === 'error' && (
           <motion.div
             key="error"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-            className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-5 bg-black/96 px-6 text-center"
+            initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
+            style={{
+              position:'absolute', inset:0, zIndex:20,
+              display:'flex', flexDirection:'column',
+              alignItems:'center', justifyContent:'center', gap:20,
+              background:'rgba(0,0,0,0.96)', textAlign:'center', padding:'0 24px',
+            }}
           >
-            <motion.div
-              initial={{ scale: 0, rotate: -15 }}
-              animate={{ scale: 1, rotate: 0 }}
-              transition={{ type: 'spring', stiffness: 260, damping: 20, delay: 0.1 }}
-            >
-              <AlertCircle className="w-14 h-14 text-red-500/90" />
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2, ...ease }}
-              className="flex flex-col gap-2"
-            >
-              <h2 className="text-white text-xl font-bold">Stream Unavailable</h2>
-              <p className="text-gray-400 text-sm max-w-sm leading-relaxed">{errorMsg}</p>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3, ...ease }}
-              className="flex gap-3 flex-wrap justify-center"
-            >
-              <motion.button
-                whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                transition={spring}
-                onClick={boot}
-                className="flex items-center gap-2 bg-[#00a8e1] text-white px-6 py-2.5 rounded-lg font-bold hover:bg-sky-400 transition-colors"
+            <AlertCircle style={{width:52,height:52,color:'#ff4444'}}/>
+            <div>
+              <p style={{color:'#fff', fontSize:20, fontWeight:700, marginBottom:8}}>Stream Unavailable</p>
+              <p style={{color:'#888', fontSize:14, lineHeight:1.6, maxWidth:360}}>{errorMsg}</p>
+            </div>
+            <div style={{display:'flex', gap:12, flexWrap:'wrap', justifyContent:'center'}}>
+              <button
+                onClick={e => { e.stopPropagation(); boot() }}
+                style={{
+                  display:'flex', alignItems:'center', gap:8,
+                  background:'#1a98ff', color:'#fff',
+                  border:'none', padding:'10px 24px', borderRadius:8,
+                  fontSize:14, fontWeight:700, cursor:'pointer',
+                }}
               >
-                <RefreshCw className="w-4 h-4" /> Try Again
-              </motion.button>
-              <motion.button
-                whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                transition={spring}
-                onClick={() => navigate(-1)}
-                className="bg-white/10 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-white/20 transition-colors"
+                <RefreshCw style={{width:16,height:16}}/> Try Again
+              </button>
+              <button
+                onClick={e => { e.stopPropagation(); navigate(-1) }}
+                style={{
+                  background:'rgba(255,255,255,0.1)', color:'#fff',
+                  border:'none', padding:'10px 24px', borderRadius:8,
+                  fontSize:14, fontWeight:700, cursor:'pointer',
+                }}
               >
                 Go Back
-              </motion.button>
-            </motion.div>
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── BUFFERING SPINNER (over video) ── */}
+      {/* ── BUFFERING SPINNER ── */}
       <AnimatePresence>
         {loadState === 'playing' && isBuffering && (
           <motion.div
-            key="buffering"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none"
+            key="buf"
+            initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
+            style={{
+              position:'absolute', inset:0, zIndex:10,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              pointerEvents:'none',
+            }}
           >
-            <div className="relative w-14 h-14">
-              <motion.div
-                className="absolute inset-0 rounded-full border-3 border-transparent border-t-white/80"
-                animate={{ rotate: 360 }}
-                transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
-              />
-            </div>
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 0.85, repeat: Infinity, ease:'linear' }}
+              style={{
+                width:52, height:52, borderRadius:'50%',
+                border:'3px solid rgba(255,255,255,0.15)',
+                borderTopColor:'#fff',
+              }}
+            />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── CONTROLS ── */}
+      {/* ── CONTROLS UI ── */}
       {loadState !== 'error' && (
         <motion.div
-          className="absolute inset-0 z-30 flex flex-col justify-between"
           animate={{ opacity: showUI ? 1 : 0 }}
-          transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-          style={{ pointerEvents: showUI ? 'auto' : 'none' }}
+          transition={{ duration: 0.25 }}
+          style={{ position:'absolute', inset:0, zIndex:30, pointerEvents: showUI ? 'auto' : 'none' }}
+          onClick={e => e.stopPropagation()}
         >
-          {/* Top bar */}
-          <motion.div
-            initial={{ y: -24, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.15, ...ease }}
-            className="flex items-center gap-3 px-4 md:px-6 py-4 bg-gradient-to-b from-black/90 via-black/40 to-transparent"
-          >
-            <motion.button
-              whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-              transition={spring}
-              onClick={() => navigate(-1)}
-              className="text-white hover:bg-white/15 p-1.5 rounded-full transition-colors"
-            >
-              <ChevronLeft className="w-7 h-7" />
-            </motion.button>
+          {/* Gradient overlays */}
+          <div style={{
+            position:'absolute', top:0, left:0, right:0, height:160,
+            background:'linear-gradient(to bottom, rgba(0,0,0,0.85), transparent)',
+            pointerEvents:'none',
+          }}/>
+          <div style={{
+            position:'absolute', bottom:0, left:0, right:0, height:220,
+            background:'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 60%, transparent 100%)',
+            pointerEvents:'none',
+          }}/>
 
-            <div className="flex-1 min-w-0">
-              <p className="text-white font-bold text-sm md:text-base uppercase tracking-widest">Now Playing</p>
-              {srcLabel && (
-                <p className="text-[11px] text-gray-400 mt-0.5">
-                  via <span className="text-[#00a8e1] font-semibold">{srcLabel}</span>
+          {/* ── TOP BAR ── */}
+          <div style={{
+            position:'absolute', top:0, left:0, right:0,
+            display:'flex', alignItems:'center', justifyContent:'space-between',
+            padding:'14px 20px', zIndex:10,
+          }}>
+            {/* Left: close + title */}
+            <div style={{display:'flex', alignItems:'center', gap:14}}>
+              <button
+                onClick={() => navigate(-1)}
+                style={{...ICON_BTN, padding:4, borderRadius:4}}
+                onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.08)'}
+                onMouseLeave={e => e.currentTarget.style.background='none'}
+              >
+                <IconClose/>
+              </button>
+              <div>
+                <p style={{fontSize:20, fontWeight:700, letterSpacing:'-0.3px', color:'#fff'}}>
+                  {title || 'Now Playing'}
                 </p>
-              )}
+                {srcLabel && (
+                  <p style={{fontSize:11, color:'#555', marginTop:1}}>
+                    via <span style={{color:'#1a98ff', fontWeight:600}}>{srcLabel}</span>
+                  </p>
+                )}
+              </div>
             </div>
 
-            <motion.button
-              whileHover={{ scale: 1.1, rotate: 180 }}
-              whileTap={{ scale: 0.9 }}
-              transition={spring}
-              onClick={boot}
-              title="Refresh stream"
-              className="text-gray-400 hover:text-white p-1.5 rounded-full hover:bg-white/10 transition-colors"
-            >
-              <RefreshCw className="w-5 h-5" />
-            </motion.button>
-          </motion.div>
+            {/* Right: CC, Volume, PiP, Fullscreen, More */}
+            <div style={{display:'flex', alignItems:'center', gap:4, position:'relative'}}>
 
-          {/* Centre play/pause */}
-          <motion.button
-            onClick={togglePlay}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            transition={spring}
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full bg-black/35 backdrop-blur-sm flex items-center justify-center hover:bg-black/55"
-          >
-            <AnimatePresence mode="wait">
-              {playing
-                ? <motion.div key="pause" initial={{ scale: 0, rotate: -90 }} animate={{ scale: 1, rotate: 0 }} exit={{ scale: 0, rotate: 90 }} transition={{ duration: 0.18 }}>
-                    <Pause fill="white" className="w-9 h-9 text-white" />
-                  </motion.div>
-                : <motion.div key="play"  initial={{ scale: 0, rotate: 90 }}  animate={{ scale: 1, rotate: 0 }} exit={{ scale: 0, rotate: -90 }} transition={{ duration: 0.18 }}>
-                    <Play fill="white" className="w-9 h-9 text-white ml-1" />
-                  </motion.div>
-              }
-            </AnimatePresence>
-          </motion.button>
+              {/* CC/Subtitles */}
+              <button
+                style={{...ICON_BTN, background: openPanel === 'subtitles' ? C.active : 'none'}}
+                onClick={e => { e.stopPropagation(); setOpenPanel(p => p === 'subtitles' ? null : 'subtitles') }}
+                onMouseEnter={e => e.currentTarget.style.background=C.hover}
+                onMouseLeave={e => e.currentTarget.style.background= openPanel==='subtitles' ? C.active : 'none'}
+                title="Subtitles"
+              >
+                <IconCC/>
+              </button>
 
-          {/* Bottom bar */}
-          <motion.div
-            initial={{ y: 24, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.15, ...ease }}
-            className="px-4 md:px-6 pb-5 pt-2 bg-gradient-to-t from-black/95 via-black/50 to-transparent"
-          >
-            {/* Seek bar */}
-            <div
-              ref={seekRef}
-              onClick={seek}
-              className="relative h-[5px] mb-4 rounded-full bg-white/15 cursor-pointer group"
-            >
-              <motion.div
-                className="absolute inset-y-0 left-0 rounded-full bg-white/20 pointer-events-none"
-                style={{ width: `${pctBuffered}%` }}
-                transition={{ duration: 0.2 }}
-              />
-              <motion.div
-                className="absolute inset-y-0 left-0 rounded-full bg-[#00a8e1] pointer-events-none"
-                style={{ width: `${pctPlayed}%` }}
-                transition={{ duration: 0.1 }}
-              />
-              {/* Scrubber dot */}
-              <div
-                className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white opacity-0 group-hover:opacity-100 shadow-lg pointer-events-none transition-all duration-150 group-hover:scale-110"
-                style={{ left: `calc(${pctPlayed}% - 8px)` }}
-              />
+              {/* Volume */}
+              <button
+                style={{...ICON_BTN, background: openPanel === 'volume' ? C.active : 'none'}}
+                onClick={e => { e.stopPropagation(); setOpenPanel(p => p === 'volume' ? null : 'volume') }}
+                onMouseEnter={e => e.currentTarget.style.background=C.hover}
+                onMouseLeave={e => e.currentTarget.style.background= openPanel==='volume' ? C.active : 'none'}
+                title="Volume"
+              >
+                {(muted || volume === 0) ? <IconVolumeMute/> : <IconVolume/>}
+              </button>
+
+              {/* PiP */}
+              <button
+                style={ICON_BTN}
+                onClick={e => {
+                  e.stopPropagation()
+                  if (document.pictureInPictureEnabled && videoRef.current)
+                    videoRef.current.requestPictureInPicture?.().catch(() => {})
+                }}
+                onMouseEnter={e => e.currentTarget.style.background=C.hover}
+                onMouseLeave={e => e.currentTarget.style.background='none'}
+                title="Picture in Picture"
+              >
+                <IconPiP/>
+              </button>
+
+              {/* Fullscreen */}
+              <button
+                style={ICON_BTN}
+                onClick={e => { e.stopPropagation(); toggleFs() }}
+                onMouseEnter={e => e.currentTarget.style.background=C.hover}
+                onMouseLeave={e => e.currentTarget.style.background='none'}
+                title="Fullscreen"
+              >
+                {fullscreen ? <IconFullscreenExit/> : <IconFullscreen/>}
+              </button>
+
+              {/* More (settings) */}
+              <button
+                style={{...ICON_BTN, background: openPanel === 'settings' ? C.active : 'none'}}
+                onClick={e => { e.stopPropagation(); setOpenPanel(p => p === 'settings' ? null : 'settings') }}
+                onMouseEnter={e => e.currentTarget.style.background=C.hover}
+                onMouseLeave={e => e.currentTarget.style.background= openPanel==='settings' ? C.active : 'none'}
+                title="Settings"
+              >
+                <IconMore/>
+              </button>
+
+              {/* ── SETTINGS PANEL ── */}
+              <AnimatePresence>
+                {openPanel === 'settings' && (
+                  <motion.div
+                    key="settings"
+                    initial={{ opacity:0, y:-8, scale:0.95 }}
+                    animate={{ opacity:1, y:0, scale:1 }}
+                    exit={{ opacity:0, y:-8, scale:0.95 }}
+                    transition={{ duration:0.18 }}
+                    style={panelStyle}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div style={panelHeaderStyle}>Settings</div>
+
+                    {/* Subtitles row */}
+                    <div
+                      style={settingsRowStyle}
+                      onClick={() => setOpenPanel('subtitles')}
+                      onMouseEnter={e => e.currentTarget.style.background=C.hover}
+                      onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                    >
+                      <IconCC/>
+                      <span style={rowLabelStyle}>Subtitles</span>
+                      <span style={rowValueStyle}>{subLabel} <IconChevronRight/></span>
+                    </div>
+
+                    {/* Audio row */}
+                    <div
+                      style={settingsRowStyle}
+                      onClick={() => setOpenPanel('audio')}
+                      onMouseEnter={e => e.currentTarget.style.background=C.hover}
+                      onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:20,height:20}}>
+                        <rect x="2" y="6" width="4" height="12" rx="1"/><rect x="8" y="3" width="4" height="18" rx="1"/>
+                        <rect x="14" y="8" width="4" height="10" rx="1"/>
+                      </svg>
+                      <span style={rowLabelStyle}>Audio</span>
+                      <span style={rowValueStyle}>{audioLabel} <IconChevronRight/></span>
+                    </div>
+
+                    {/* Quality row */}
+                    <div
+                      style={settingsRowStyle}
+                      onClick={() => setOpenPanel('quality')}
+                      onMouseEnter={e => e.currentTarget.style.background=C.hover}
+                      onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:20,height:20}}>
+                        <rect x="2" y="4" width="20" height="16" rx="2"/>
+                        <line x1="8" y1="20" x2="8" y2="22"/><line x1="16" y1="20" x2="16" y2="22"/>
+                        <line x1="5" y1="22" x2="19" y2="22"/>
+                      </svg>
+                      <span style={rowLabelStyle}>Video Quality</span>
+                      <span style={rowValueStyle}>{qualityLabel} <IconChevronRight/></span>
+                    </div>
+
+                    {/* Speed row */}
+                    <div
+                      style={{...settingsRowStyle, borderBottom:'none'}}
+                      onClick={() => setOpenPanel('speed')}
+                      onMouseEnter={e => e.currentTarget.style.background=C.hover}
+                      onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{width:20,height:20}}>
+                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                      </svg>
+                      <span style={rowLabelStyle}>Playback Speed</span>
+                      <span style={rowValueStyle}>{speedLabel} <IconChevronRight/></span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* ── AUDIO SUB-PANEL ── */}
+              <AnimatePresence>
+                {openPanel === 'audio' && (
+                  <motion.div
+                    key="audio"
+                    initial={{ opacity:0, y:-8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-8 }}
+                    transition={{ duration:0.18 }}
+                    style={panelStyle}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div style={panelHeaderStyle}>
+                      <button
+                        style={{background:'none',border:'none',color:'#fff',cursor:'pointer',padding:2,borderRadius:4,display:'flex',alignItems:'center'}}
+                        onClick={() => setOpenPanel('settings')}
+                      >
+                        <IconChevronLeft/>
+                      </button>
+                      Audio
+                    </div>
+                    {audioTracks.length === 0 ? (
+                      <p style={{color:C.textSec, fontSize:13, textAlign:'center', padding:'28px 20px'}}>
+                        No alternate audio tracks available
+                      </p>
+                    ) : audioTracks.map(t => (
+                      <div
+                        key={t.id}
+                        style={radioOptionStyle}
+                        onClick={() => switchAudio(t.id)}
+                        onMouseEnter={e => e.currentTarget.style.background=C.hover}
+                        onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                      >
+                        <RadioCircle selected={t.id === activeAudio}/>
+                        <div>
+                          <div style={{fontSize:15, fontWeight:500}}>{t.label}</div>
+                          {t.lang && <div style={{fontSize:12, color:C.textSec, marginTop:2}}>{t.lang.toUpperCase()}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* ── QUALITY SUB-PANEL ── */}
+              <AnimatePresence>
+                {openPanel === 'quality' && (
+                  <motion.div
+                    key="quality"
+                    initial={{ opacity:0, y:-8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-8 }}
+                    transition={{ duration:0.18 }}
+                    style={panelStyle}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div style={panelHeaderStyle}>
+                      <button
+                        style={{background:'none',border:'none',color:'#fff',cursor:'pointer',padding:2,borderRadius:4,display:'flex',alignItems:'center'}}
+                        onClick={() => setOpenPanel('settings')}
+                      >
+                        <IconChevronLeft/>
+                      </button>
+                      Video Quality
+                    </div>
+                    {qualities.length === 0 ? (
+                      <p style={{color:C.textSec, fontSize:13, textAlign:'center', padding:'28px 20px'}}>
+                        Quality options unavailable
+                      </p>
+                    ) : qualities.map(q => (
+                      <div
+                        key={q.id}
+                        style={{
+                          ...radioOptionStyle,
+                          background: q.id === activeQuality ? 'rgba(255,255,255,0.95)' : 'transparent',
+                          borderRadius: q.id === activeQuality ? 6 : 0,
+                        }}
+                        onClick={() => switchQuality(q.id)}
+                        onMouseEnter={e => {
+                          if (q.id !== activeQuality) e.currentTarget.style.background=C.hover
+                        }}
+                        onMouseLeave={e => {
+                          e.currentTarget.style.background = q.id === activeQuality
+                            ? 'rgba(255,255,255,0.95)' : 'transparent'
+                        }}
+                      >
+                        <div style={{
+                          width:20, height:20, minWidth:20,
+                          border:`2px solid ${q.id === activeQuality ? '#000' : C.textSec}`,
+                          borderRadius:'50%',
+                          display:'flex', alignItems:'center', justifyContent:'center',
+                          background: q.id === activeQuality ? '#000' : 'transparent',
+                          flexShrink:0,
+                        }}>
+                          {q.id === activeQuality && <div style={{width:8,height:8,background:'#fff',borderRadius:'50%'}}/>}
+                        </div>
+                        <div>
+                          <div style={{fontSize:15, fontWeight:500, color: q.id === activeQuality ? '#000' : '#fff'}}>
+                            {q.label}
+                          </div>
+                          {q.bitrate && (
+                            <div style={{fontSize:12, color: q.id === activeQuality ? '#444' : C.textSec, marginTop:2}}>
+                              ~{(q.bitrate / 1e6).toFixed(1)} Mbps
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* ── SUBTITLES SUB-PANEL ── */}
+              <AnimatePresence>
+                {openPanel === 'subtitles' && (
+                  <motion.div
+                    key="subtitles"
+                    initial={{ opacity:0, y:-8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-8 }}
+                    transition={{ duration:0.18 }}
+                    style={panelStyle}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div style={panelHeaderStyle}>
+                      <button
+                        style={{background:'none',border:'none',color:'#fff',cursor:'pointer',padding:2,borderRadius:4,display:'flex',alignItems:'center'}}
+                        onClick={() => setOpenPanel('settings')}
+                      >
+                        <IconChevronLeft/>
+                      </button>
+                      Subtitles
+                    </div>
+                    {subTracks.length <= 1 ? (
+                      <p style={{color:C.textSec, fontSize:13, textAlign:'center', padding:'28px 20px'}}>
+                        No subtitles in this stream
+                      </p>
+                    ) : subTracks.map(s => (
+                      <div
+                        key={s.id}
+                        style={radioOptionStyle}
+                        onClick={() => switchSub(s.id)}
+                        onMouseEnter={e => e.currentTarget.style.background=C.hover}
+                        onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                      >
+                        <RadioCircle selected={s.id === activeSub}/>
+                        <div style={{fontSize:15, fontWeight:500}}>{s.label}</div>
+                      </div>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* ── SPEED SUB-PANEL ── */}
+              <AnimatePresence>
+                {openPanel === 'speed' && (
+                  <motion.div
+                    key="speed"
+                    initial={{ opacity:0, y:-8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-8 }}
+                    transition={{ duration:0.18 }}
+                    style={panelStyle}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div style={panelHeaderStyle}>
+                      <button
+                        style={{background:'none',border:'none',color:'#fff',cursor:'pointer',padding:2,borderRadius:4,display:'flex',alignItems:'center'}}
+                        onClick={() => setOpenPanel('settings')}
+                      >
+                        <IconChevronLeft/>
+                      </button>
+                      Playback Speed
+                    </div>
+                    {SPEEDS.map(r => (
+                      <div
+                        key={r}
+                        style={radioOptionStyle}
+                        onClick={() => setSpeedFn(r)}
+                        onMouseEnter={e => e.currentTarget.style.background=C.hover}
+                        onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                      >
+                        <RadioCircle selected={r === speed}/>
+                        <div style={{fontSize:15, fontWeight:500}}>
+                          {r === 1 ? 'Normal' : `${r}×`}
+                        </div>
+                      </div>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* ── VOLUME POPUP ── */}
+              <AnimatePresence>
+                {openPanel === 'volume' && (
+                  <motion.div
+                    key="volume"
+                    initial={{ opacity:0, y:-8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-8 }}
+                    transition={{ duration:0.18 }}
+                    style={{...panelStyle, width:240, padding:'16px 20px'}}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <label style={{fontSize:14, color:C.textSec, display:'block', marginBottom:14}}>Volume</label>
+                    <input
+                      type="range" min="0" max="100" step="1"
+                      value={volPct}
+                      onChange={e => setVol(parseInt(e.target.value) / 100)}
+                      style={{
+                        width:'100%', WebkitAppearance:'none', appearance:'none',
+                        height:4, borderRadius:2, outline:'none', cursor:'pointer',
+                        background:`linear-gradient(to right, #fff ${volPct}%, rgba(255,255,255,0.3) ${volPct}%)`,
+                      }}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
             </div>
+          </div>
 
-            <div className="flex items-center gap-2 md:gap-3">
-              <motion.button
-                whileTap={{ scale: 0.85 }} transition={spring}
-                onClick={() => { if (videoRef.current) videoRef.current.currentTime -= 10 }}
-                className="text-white/75 hover:text-white hidden sm:block transition-colors"
-              >
-                <SkipBack className="w-5 h-5" />
-              </motion.button>
-
-              <motion.button
-                whileTap={{ scale: 0.85 }} transition={spring}
-                onClick={togglePlay}
-                className="text-white hover:text-[#00a8e1] transition-colors"
-              >
-                {playing
-                  ? <Pause fill="white" className="w-6 h-6" />
-                  : <Play  fill="white" className="w-6 h-6 ml-0.5" />}
-              </motion.button>
-
-              <motion.button
-                whileTap={{ scale: 0.85 }} transition={spring}
-                onClick={() => { if (videoRef.current) videoRef.current.currentTime += 10 }}
-                className="text-white/75 hover:text-white hidden sm:block transition-colors"
-              >
-                <SkipForward className="w-5 h-5" />
-              </motion.button>
-
-              <motion.button
-                whileTap={{ scale: 0.85 }} transition={spring}
-                onClick={toggleMute}
-                className="text-white hover:text-[#00a8e1] transition-colors"
-              >
-                {muted || volume === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-              </motion.button>
-
-              <input
-                type="range" min="0" max="1" step="0.02"
-                value={muted ? 0 : volume}
-                onChange={e => setVol(parseFloat(e.target.value))}
-                onClick={e => e.stopPropagation()}
-                className="w-20 md:w-28 accent-[#00a8e1] cursor-pointer"
-                style={{ accentColor: '#00a8e1' }}
-              />
-
-              <span className="text-white/70 text-xs font-mono tabular-nums ml-1 hidden sm:inline">
-                {fmt(current)} / {fmt(duration)}
+          {/* ── BOTTOM CONTROLS ── */}
+          <div style={{
+            position:'absolute', bottom:0, left:0, right:0,
+            padding:'0 0 28px 0', zIndex:10,
+          }}>
+            {/* Scrubber */}
+            <div style={{
+              padding:'0 16px', marginBottom:16,
+              display:'flex', alignItems:'center', gap:12,
+            }}>
+              <span style={{fontSize:13, color:'#fff', minWidth:45, letterSpacing:'0.02em'}}>
+                {fmt(current)}
               </span>
 
-              <div className="flex-1" />
-
-              {/* Settings panel */}
-              <div className="relative" onClick={e => e.stopPropagation()}>
-                <motion.button
-                  whileHover={{ scale: 1.1, rotate: 45 }}
-                  whileTap={{ scale: 0.9 }}
-                  transition={spring}
-                  onClick={() => { setShowPanel(p => !p); resetHide() }}
-                  className={`p-1.5 rounded-lg transition-colors hover:bg-white/10 ${showPanel ? 'text-[#00a8e1]' : 'text-white'}`}
-                >
-                  <Settings className="w-5 h-5" />
-                </motion.button>
-
-                <AnimatePresence>
-                  {showPanel && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10, scale: 0.92 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.92 }}
-                      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                      className="absolute bottom-12 right-0 w-72 rounded-2xl overflow-hidden shadow-2xl bg-[#0a1018]/98 border border-white/10 backdrop-blur-xl z-40"
-                    >
-                      {/* Tabs */}
-                      <div className="flex border-b border-white/8">
-                        {[
-                          { id: 'audio',   icon: <Languages className="w-3.5 h-3.5" />, label: 'Audio'   },
-                          { id: 'quality', icon: <Gauge      className="w-3.5 h-3.5" />, label: 'Quality' },
-                          { id: 'speed',   icon: <Gauge      className="w-3.5 h-3.5" />, label: 'Speed'   },
-                          { id: 'subs',    icon: <Settings   className="w-3 h-3"     />, label: 'Subs'    },
-                        ].map(tab => (
-                          <button
-                            key={tab.id}
-                            onClick={() => setPanelTab(tab.id)}
-                            className={`flex-1 flex flex-col items-center gap-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${panelTab === tab.id ? 'text-[#00a8e1] border-b-2 border-[#00a8e1]' : 'text-gray-500 hover:text-gray-300'}`}
-                          >
-                            {tab.icon}{tab.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Panel content */}
-                      <div className="max-h-56 overflow-y-auto py-1">
-                        {panelTab === 'audio' && (audioTracks.length === 0
-                          ? <p className="text-gray-600 text-xs text-center py-8">No alternate audio tracks available</p>
-                          : audioTracks.map(t => (
-                            <button key={t.id} onClick={() => switchAudio(t.id)}
-                              className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-colors hover:bg-white/8 ${t.id === activeAudio ? 'text-[#00a8e1]' : 'text-gray-300'}`}>
-                              <span>{t.label}</span>
-                              {t.id === activeAudio && <motion.span layoutId="audio-dot" className="w-2 h-2 rounded-full bg-[#00a8e1]" />}
-                            </button>
-                          ))
-                        )}
-                        {panelTab === 'quality' && (qualities.length === 0
-                          ? <p className="text-gray-600 text-xs text-center py-8">Quality options unavailable</p>
-                          : qualities.map(q => (
-                            <button key={q.id} onClick={() => switchQ(q.id)}
-                              className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-colors hover:bg-white/8 ${q.id === activeQuality ? 'text-[#00a8e1]' : 'text-gray-300'}`}>
-                              <span>{q.label}</span>
-                              {q.id === activeQuality && <motion.span layoutId="quality-dot" className="w-2 h-2 rounded-full bg-[#00a8e1]" />}
-                            </button>
-                          ))
-                        )}
-                        {panelTab === 'speed' && SPEEDS.map(r => (
-                          <button key={r} onClick={() => setSpeedFn(r)}
-                            className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-colors hover:bg-white/8 ${r === speed ? 'text-[#00a8e1]' : 'text-gray-300'}`}>
-                            <span>{r === 1 ? 'Normal' : `${r}×`}</span>
-                            {r === speed && <motion.span layoutId="speed-dot" className="w-2 h-2 rounded-full bg-[#00a8e1]" />}
-                          </button>
-                        ))}
-                        {panelTab === 'subs' && (subTracks.length <= 1
-                          ? <p className="text-gray-600 text-xs text-center py-8">No subtitles in this stream</p>
-                          : subTracks.map(t => (
-                            <button key={t.id} onClick={() => switchSub(t.id)}
-                              className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-colors hover:bg-white/8 ${t.id === activeSub ? 'text-[#00a8e1]' : 'text-gray-300'}`}>
-                              <span>{t.label}</span>
-                              {t.id === activeSub && <motion.span layoutId="sub-dot" className="w-2 h-2 rounded-full bg-[#00a8e1]" />}
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+              <div
+                ref={seekTrackRef}
+                onClick={e => { e.stopPropagation(); seekTo(e) }}
+                style={{
+                  flex:1, position:'relative',
+                  height:3, background:'rgba(255,255,255,0.3)',
+                  borderRadius:2, cursor:'pointer',
+                  transition:'height 0.15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.height='5px' }}
+                onMouseLeave={e => { e.currentTarget.style.height='3px' }}
+              >
+                {/* Buffered */}
+                <div style={{
+                  position:'absolute', inset:'0 auto 0 0',
+                  width:`${pctBuffered}%`,
+                  background:'rgba(255,255,255,0.2)', borderRadius:2,
+                }}/>
+                {/* Played */}
+                <div style={{
+                  position:'absolute', inset:'0 auto 0 0',
+                  width:`${pctPlayed}%`,
+                  background:'#fff', borderRadius:2, position:'relative',
+                }}>
+                  {/* Thumb */}
+                  <div style={{
+                    position:'absolute', right:-5, top:'50%',
+                    transform:'translateY(-50%)',
+                    width:10, height:10,
+                    background:'#fff', borderRadius:'50%',
+                    boxShadow:'0 0 4px rgba(0,0,0,0.5)',
+                  }}/>
+                </div>
               </div>
 
-              <motion.button
-                whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                transition={spring}
-                onClick={toggleFs}
-                className="text-white hover:text-[#00a8e1] transition-colors ml-1"
-              >
-                {fullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-              </motion.button>
+              <span style={{fontSize:13, color:'#fff', minWidth:45, textAlign:'right', letterSpacing:'0.02em'}}>
+                {fmt(duration)}
+              </span>
             </div>
-          </motion.div>
+
+            {/* Playback buttons */}
+            <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:20}}>
+              {/* Skip back 10 */}
+              <button
+                style={{background:'none',border:'none',color:'#fff',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',borderRadius:'50%',transition:'background 0.15s',padding:6}}
+                onClick={e => { e.stopPropagation(); if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10); resetHide() }}
+                onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.08)'}
+                onMouseLeave={e => e.currentTarget.style.background='none'}
+                title="Back 10 seconds"
+              >
+                <IconSkipBack/>
+              </button>
+
+              {/* Play/Pause — white circle */}
+              <button
+                onClick={e => { e.stopPropagation(); togglePlay() }}
+                style={{
+                  width:56, height:56,
+                  background:'rgba(255,255,255,0.95)',
+                  border:'none', borderRadius:'50%',
+                  display:'flex', alignItems:'center', justifyContent:'center',
+                  cursor:'pointer', color:'#000',
+                  transition:'background 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,1)'}
+                onMouseLeave={e => e.currentTarget.style.background='rgba(255,255,255,0.95)'}
+              >
+                <AnimatePresence mode="wait">
+                  {playing
+                    ? <motion.div key="p" initial={{scale:0}} animate={{scale:1}} exit={{scale:0}} transition={{duration:0.15}}><IconPause/></motion.div>
+                    : <motion.div key="pl" initial={{scale:0}} animate={{scale:1}} exit={{scale:0}} transition={{duration:0.15}}><IconPlay/></motion.div>
+                  }
+                </AnimatePresence>
+              </button>
+
+              {/* Skip fwd 10 */}
+              <button
+                style={{background:'none',border:'none',color:'#fff',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',borderRadius:'50%',transition:'background 0.15s',padding:6}}
+                onClick={e => { e.stopPropagation(); if (videoRef.current) videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10); resetHide() }}
+                onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.08)'}
+                onMouseLeave={e => e.currentTarget.style.background='none'}
+                title="Forward 10 seconds"
+              >
+                <IconSkipFwd/>
+              </button>
+            </div>
+          </div>
+
         </motion.div>
       )}
     </div>
