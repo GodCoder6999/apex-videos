@@ -193,8 +193,8 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
 
       <div className="relative">
         
-        {/* Absolute Wrapper for Fades and Arrows — z-[9999] forces this above hovered popup cards */}
-        <div className={`absolute left-0 right-0 top-[20px] pointer-events-none flex items-center justify-between z-[9999] ${isLargeRow ? 'h-[240px] md:h-[300px]' : 'h-[118px] md:h-[158px]'}`}>
+        {/* CHANGED: z-[50000] completely overrides the 10000 z-index of the .hover-popup in index.css */}
+        <div className={`absolute left-0 right-0 top-[20px] pointer-events-none flex items-center justify-between z-[50000] ${isLargeRow ? 'h-[240px] md:h-[300px]' : 'h-[118px] md:h-[158px]'}`}>
           
           {/* Left edge fade */}
           <AnimatePresence>
@@ -217,10 +217,10 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
           </AnimatePresence>
 
           {/* Scrolling Arrows */}
-          <div className="absolute left-2 md:left-4 z-[9999]">
+          <div className="absolute left-2 md:left-4 z-[50000]">
             <ScrollArrow dir="left" onClick={() => scroll('left')} visible={canScrollL && isRowHovered} />
           </div>
-          <div className="absolute right-2 md:right-4 z-[9999]">
+          <div className="absolute right-2 md:right-4 z-[50000]">
             <ScrollArrow dir="right" onClick={() => scroll('right')} visible={canScrollR && isRowHovered} />
           </div>
 
