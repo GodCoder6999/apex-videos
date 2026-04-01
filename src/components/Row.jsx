@@ -172,7 +172,7 @@ const Row = ({ title, fetchUrl, isLargeRow = false }) => {
         {/* Scrollable row — overflow-y: visible lets popups escape */}
         <div
           ref={rowRef}
-          className="row-scroll-outer px-4 md:px-10"
+          className={`row-scroll-outer px-4 md:px-10 ${isLargeRow ? 'tall-row' : ''}`}
           style={{ scrollSnapType: 'x mandatory' }}
         >
         <div className="movie-row">
