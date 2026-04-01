@@ -20,17 +20,17 @@ export default function Row({ title, fetchUrl, isLargeRow = false }) {
 
   useEffect(() => {
     fetch(`${BASE_URL}${fetchUrl}`)
-      .then(r => r.json())
-      .then(d => setMovies(d.results || []));
+      .then((r) => r.json())
+      .then((d) => setMovies(d.results || []));
   }, [fetchUrl]);
 
   // Handle Trailer Fetch on Hover
   useEffect(() => {
     if (hoveredMovie) {
-      const title = hoveredMovie.title || hoveredMovie.name || hoveredMovie.original_name;
-      movieTrailer(title, { id: true })
+      const movieTitle = hoveredMovie.title || hoveredMovie.name || hoveredMovie.original_name;
+      movieTrailer(movieTitle, { id: true })
         .then((url) => setTrailerUrl(url))
-        .catch(() => setTrailerUrl('')); // Fallback if no trailer
+        .catch(() => setTrailerUrl('')); // Fallback if no trailer is found
     } else {
       setTrailerUrl('');
     }
@@ -55,10 +55,16 @@ export default function Row({ title, fetchUrl, isLargeRow = false }) {
       <h2 className="text-xl md:text-2xl font-bold text-gray-100 mb-2">{title}</h2>
 
       {/* Slide Arrows */}
-      <div className="absolute top-1/2 left-0 z-40 hidden group-hover:block -translate-y-1/2 bg-black/50 p-2 cursor-pointer hover:bg-black/80" onClick={() => handleScroll('left')}>
+      <div 
+        className="absolute top-1/2 left-0 z-40 hidden group-hover:flex items-center justify-center h-full w-12 -translate-y-1/2 bg-black/50 cursor-pointer hover:bg-black/80 transition-colors" 
+        onClick={() => handleScroll('left')}
+      >
         <ChevronLeft className="w-8 h-8 text-white" />
       </div>
-      <div className="absolute top-1/2 right-0 z-40 hidden group-hover:block -translate-y-1/2 bg-black/50 p-2 cursor-pointer hover:bg-black/80" onClick={() => handleScroll('right')}>
+      <div 
+        className="absolute top-1/2 right-0 z-40 hidden group-hover:flex items-center justify-center h-full w-12 -translate-y-1/2 bg-black/50 cursor-pointer hover:bg-black/80 transition-colors" 
+        onClick={() => handleScroll('right')}
+      >
         <ChevronRight className="w-8 h-8 text-white" />
       </div>
 
@@ -79,27 +85,36 @@ export default function Row({ title, fetchUrl, isLargeRow = false }) {
                 onClick={() => navigate(`/detail/${type}/${movie.id}`, { state: { movie } })}
                 className="w-full h-full object-cover rounded"
                 src={`${IMAGE_BASE_URL}${isLargeRow ? movie.poster_path : movie.backdrop_path}`}
-                alt={movie.name}
+                alt={movie.name || movie.title}
               />
 
-              {/* Hover Popup */}
-              <div className="hover-popup absolute top-[-20px] left-[-40px] w-[320px] md:w-[380px] bg-primeHover rounded-xl shadow-2xl opacity-0 invisible scale-75 transition-all duration-300 origin-bottom z-[100000] overflow-hidden pointer-events-none group-hover:pointer-events-auto">
-                <div className="relative w-full h-[180px] bg-black cursor-pointer" onClick={() => navigate(`/detail/${type}/${movie.id}`, { state: { movie } })}>
+              {/* Hover Popup Container */}
+              <div className="hover-popup absolute top-[-20px] left-[-40px] w-[320px] md:w-[380px] bg-[#1a242f] rounded-xl shadow-2xl opacity-0 invisible scale-75 transition-all duration-300 origin-bottom z-[100000] overflow-hidden pointer-events-none group-hover:pointer-events-auto">
+                <div 
+                  className="relative w-full h-[180px] bg-black cursor-pointer" 
+                  onClick={() => navigate(`/detail/${type}/${movie.id}`, { state: { movie } })}
+                >
                   {trailerUrl && hoveredMovie?.id === movie.id ? (
                      <YouTube videoId={trailerUrl} opts={opts} className="absolute inset-0 w-full h-full pointer-events-none" />
                   ) : (
-                    <img className="w-full h-full object-cover" src={`${IMAGE_BASE_URL}${movie.backdrop_path}`} alt={movie.name} />
+                    <img className="w-full h-full object-cover" src={`${IMAGE_BASE_URL}${movie.backdrop_path}`} alt={movie.name || movie.title} />
                   )}
                 </div>
                 <div className="p-4">
                   <h3 className="text-xl font-bold text-white mb-3 truncate">{movie.title || movie.name}</h3>
                   <div className="flex gap-3 mb-3">
-                    <button onClick={(e) => { e.stopPropagation(); navigate(`/play/${type}/${movie.id}`); }} className="flex-1 flex justify-center items-center gap-2 bg-white text-black py-2 rounded font-bold hover:bg-gray-200">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); navigate(`/play/${type}/${movie.id}`); }} 
+                      className="flex-1 flex justify-center items-center gap-2 bg-white text-black py-2 rounded font-bold hover:bg-gray-200 transition-colors"
+                    >
                       <Play className="w-4 h-4" fill="currentColor" /> Play
                     </button>
-                    <button className="w-10 h-10 rounded-full border border-gray-500 flex items-center justify-center hover:border-white">
+                    <button className="w-10 h-10 rounded-full border border-gray-500 text-white flex items-center justify-center hover:border-white transition-colors">
                       <Plus className="w-5 h-5" />
                     </button>
+                  </div>
+                  <div className="text-xs text-gray-400 font-semibold mt-2">
+                    {movie.release_date ? movie.release_date.substring(0, 4) : ''} • {movie.vote_average?.toFixed(1)} Rating
                   </div>
                 </div>
               </div>
