@@ -278,7 +278,8 @@ export default function Player() {
       const stream = json.streams.find(s => s.url)
       if (!stream) throw new Error('No playable stream URL found.')
 
-      m3u8   = stream.url
+      // --- FIX: Pass the raw stream URL through our proxy so CORS isn't blocked ---
+      m3u8   = `/api/proxy?url=${encodeURIComponent(stream.url)}`
       source = stream.name
         ? `${stream.name}${stream.title ? ' · ' + stream.title.split('\n')[0] : ''}`
         : 'Nuvio Streams'
@@ -298,7 +299,7 @@ export default function Player() {
     const video2 = videoRef.current
     if (!video2) return
 
-    const isM3U8 = /\.m3u8/i.test(m3u8)
+    const isM3U8 = /\.m3u8/i.test(m3u8) || stream.url.includes('.m3u8') // Check original URL for extension too
 
     // ── Native fallback (Safari / no HLS support) ───────────────────────────
     if (!isM3U8 || !Hls || !Hls.isSupported()) {
@@ -349,17 +350,19 @@ export default function Player() {
       // Audio tracks
       const at = hls.audioTracks || []
       if (at.length > 0) {
-        const mapped = at.map((t, i) => ({
-          id:    i,
-          label: t.name || t.lang || `Track ${i + 1}`,
+        // --- FIX: Map the tracks using the actual internal track ID (t.id) ---
+        const mapped = at.map(t => ({
+          id:    t.id, 
+          label: t.name || t.lang || `Track ${t.id}`,
           lang:  t.lang || '',
         }))
         setAudioTracks(mapped)
-        // Pick default track (first enabled or 0)
-        const defIdx = at.findIndex(t => t.default) !== -1
-          ? at.findIndex(t => t.default) : 0
-        setActiveAudio(defIdx)
-        hls.audioTrack = defIdx
+        
+        // Pick default track
+        const defTrack = at.find(t => t.default) || at[0]
+        const defId = defTrack ? defTrack.id : 0
+        setActiveAudio(defId)
+        hls.audioTrack = defId
       }
 
       // Subtitle tracks
@@ -377,9 +380,10 @@ export default function Player() {
     })
 
     hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_, d) => {
-      const mapped = (d.audioTracks || []).map((t, i) => ({
-        id:    i,
-        label: t.name || t.lang || `Track ${i + 1}`,
+      // --- FIX: Map the updated tracks using the actual internal track ID (t.id) ---
+      const mapped = (d.audioTracks || []).map(t => ({
+        id:    t.id,
+        label: t.name || t.lang || `Track ${t.id}`,
         lang:  t.lang || '',
       }))
       setAudioTracks(mapped)
