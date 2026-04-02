@@ -1,7 +1,7 @@
 // src/pages/Player.jsx
 // ─────────────────────────────────────────────────────────────────────────────
 // INDEX SEARCH ENGINE + DEEP SCRAPING
-// Locates specific folders in the 111477.xyz index, finds the episode file,
+// Locates specific folders in the 111477.xyz index, finds the episode/movie file,
 // then scrapes the file's HTML page to extract the direct URL from the 
 // Download button, and plays the raw .mkv/.mp4 via the custom video player.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -59,6 +59,8 @@ function detectQuality(str) {
   if (/480p|sd\b/i.test(str))     return '480p'
   return null
 }
+
+const isVideo = (href) => /\.(mp4|mkv|ts|webm|avi)$/i.test(href)
 
 // ─── Proxy URL builder ────────────────────────────────────────────────────────
 function proxyUrl(url) {
@@ -151,7 +153,7 @@ export default function Player() {
   }, [])
   useEffect(() => { resetHide(); return () => clearTimeout(hideTimer.current) }, [resetHide])
 
-  // ── Load Stream ─────────────────────────────────────────────────────────────
+  // ── Load Stream into your native playing logic ──────────────────────────────
   const loadStream = useCallback(async (stream) => {
     if (!stream) return
     setActiveStream(stream)
@@ -171,6 +173,7 @@ export default function Player() {
 
     if (!v) return
 
+    // Directly play standard mp4/mkv files via HTML5 video tag
     if (!isM || !Hls || !Hls.isSupported()) {
       v.src = url
       v.play().catch(()=>{})
@@ -201,17 +204,13 @@ export default function Player() {
       const res = await fetch(`/api/proxy?url=${encodeURIComponent(filePageUrl)}`)
       const contentType = res.headers.get('content-type') || ''
       
-      // If the server responded with the video file directly, cancel to save bandwidth & return URL
       if (!contentType.includes('text/html')) {
         if (res.body) await res.body.cancel().catch(()=>{})
         return filePageUrl
       }
 
       const html = await res.text()
-      
-      // Look for the href in the Download button within the page.
-      // E.g., matching a link ending with the file extension, or having an explicit path like /d/
-      const dlRegex = /href\s*=\s*"([^"]+\.(?:mkv|mp4|ts|webm)(?:\?[^"]*)?)"/gi
+      const dlRegex = /href\s*=\s*"([^"]+\.(?:mkv|mp4|ts|webm|avi)(?:\?[^"]*)?)"/gi
       let match
       let bestLink = filePageUrl
 
@@ -219,7 +218,6 @@ export default function Player() {
         const link = match[1]
         if (!link.includes('../')) {
            bestLink = link
-           // Prioritize specific Alist patterns like '/d/' (direct) 
            if (link.includes('/d/') || link.includes('download')) {
              break
            }
@@ -335,7 +333,7 @@ export default function Player() {
         const fText = fileMatch[2]
         if (fHref === '../' || fText === 'Name' || fText === 'Size') continue
 
-        if (fHref.endsWith('.mp4') || fHref.endsWith('.mkv') || fHref.endsWith('.ts') || fHref.endsWith('.webm')) {
+        if (isVideo(fHref)) {
           rootFiles.push({ href: fHref, text: fText })
         } else if (fHref.endsWith('/')) {
           folderLinks.push({ href: fHref, text: fText })
@@ -363,7 +361,7 @@ export default function Player() {
           const epHref = epMatch[1]
           const epText = epMatch[2]
           
-          if (epHref.endsWith('.mp4') || epHref.endsWith('.mkv') || epHref.endsWith('.ts') || epHref.endsWith('.webm')) {
+          if (isVideo(epHref)) {
              if (ePattern.test(epText)) {
                 const filePageUrl = epHref.startsWith('http') ? epHref : targetUrl + epHref
                 
@@ -379,11 +377,32 @@ export default function Player() {
           }
         }
       } else {
-        for (let i = 0; i < rootFiles.length; i++) {
-           const file = rootFiles[i]
-           const filePageUrl = file.href.startsWith('http') ? file.href : directoryUrl + file.href
+        // Movies: Parse directly from root, or dive one folder deeper if nested
+        let targetFiles = rootFiles;
+        let targetDirUrl = directoryUrl;
+
+        // Fallback: If no files are in the main movie folder, check the first subfolder
+        if (targetFiles.length === 0 && folderLinks.length > 0) {
+          targetDirUrl = directoryUrl + folderLinks[0].href;
+          const subRes = await fetch(`/api/proxy?url=${encodeURIComponent(targetDirUrl)}`);
+          const subHtml = await subRes.text();
+          
+          const subRegex = /<a href="([^"]+)">([^<]+)<\/a>/g;
+          let subMatch;
+          while ((subMatch = subRegex.exec(subHtml)) !== null) {
+            const fHref = subMatch[1];
+            const fText = subMatch[2];
+            if (isVideo(fHref)) {
+              targetFiles.push({ href: fHref, text: fText });
+            }
+          }
+        }
+
+        for (let i = 0; i < targetFiles.length; i++) {
+           const file = targetFiles[i]
+           const filePageUrl = file.href.startsWith('http') ? file.href : targetDirUrl + file.href
            
-           setLoadStep(`Extracting direct download link (${i+1}/${rootFiles.length})…`); setLoadPct(70)
+           setLoadStep(`Extracting direct download link (${i+1}/${targetFiles.length})…`); setLoadPct(70)
            const directUrl = await getDirectLinkFromPage(filePageUrl)
 
            allStreams.push({
@@ -398,7 +417,12 @@ export default function Player() {
     }
 
     if (!allStreams.length) {
-      setLoadState('error'); setErrorMsg(`No playable streams found for Season ${season} Episode ${episode}.`); return
+      setLoadState('error'); 
+      const errMsg = type === 'tv' 
+        ? `No playable streams found for Season ${season} Episode ${episode}.`
+        : `No playable streams found for this movie.`;
+      setErrorMsg(errMsg); 
+      return
     }
 
     // Sort by Quality and Language
