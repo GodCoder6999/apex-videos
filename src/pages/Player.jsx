@@ -1,9 +1,9 @@
 // src/pages/Player.jsx
 // ─────────────────────────────────────────────────────────────────────────────
-// INDEX SEARCH ENGINE + DEEP SCRAPING
-// Locates specific folders in the 111477.xyz index, finds the episode/movie file,
-// then scrapes the file's HTML page to extract the direct URL from the 
-// Download button, and plays the raw .mkv/.mp4 via the custom video player.
+// INDEX SEARCH ENGINE + DIRECT ALIST STREAMING
+// Locates folders in the 111477.xyz index, strictly matches hrefs for full 
+// SXXEXX filenames, and constructs the direct /d/ raw download link to bypass 
+// Alist preview pages, feeding the raw .mkv/.mp4 directly to the player.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
@@ -61,6 +61,19 @@ function detectQuality(str) {
 }
 
 const isVideo = (href) => /\.(mp4|mkv|ts|webm|avi)$/i.test(href)
+
+// Automatically converts an Alist viewer URL to a raw direct download link
+function getDirectAlistUrl(fileUrl) {
+  try {
+    const u = new URL(fileUrl)
+    if (!u.pathname.startsWith('/d/')) {
+      u.pathname = '/d' + u.pathname
+    }
+    return u.href
+  } catch (e) {
+    return fileUrl
+  }
+}
 
 // ─── Proxy URL builder ────────────────────────────────────────────────────────
 function proxyUrl(url) {
@@ -198,45 +211,6 @@ export default function Player() {
     })
   }, [])
 
-  // ── Scrape Download Button for Direct Video Link ────────────────────────────
-  async function getDirectLinkFromPage(filePageUrl) {
-    try {
-      const res = await fetch(`/api/proxy?url=${encodeURIComponent(filePageUrl)}`)
-      const contentType = res.headers.get('content-type') || ''
-      
-      if (!contentType.includes('text/html')) {
-        if (res.body) await res.body.cancel().catch(()=>{})
-        return filePageUrl
-      }
-
-      const html = await res.text()
-      const dlRegex = /href\s*=\s*"([^"]+\.(?:mkv|mp4|ts|webm|avi)(?:\?[^"]*)?)"/gi
-      let match
-      let bestLink = filePageUrl
-
-      while ((match = dlRegex.exec(html)) !== null) {
-        const link = match[1]
-        if (!link.includes('../')) {
-           bestLink = link
-           if (link.includes('/d/') || link.includes('download')) {
-             break
-           }
-        }
-      }
-
-      if (bestLink !== filePageUrl) {
-        if (bestLink.startsWith('http')) return bestLink
-        if (bestLink.startsWith('/')) {
-            const urlObj = new URL(filePageUrl)
-            return `${urlObj.protocol}//${urlObj.host}${bestLink}`
-        }
-        return new URL(bestLink, filePageUrl).href
-      }
-    } catch (err) {
-      console.warn('Failed to extract direct link from page button:', err)
-    }
-    return filePageUrl
-  }
 
   // ── Boot sequence ───────────────────────────────────────────────────────────
   const boot = useCallback(async () => {
@@ -341,7 +315,7 @@ export default function Player() {
       }
 
       if (type === 'tv') {
-        const sPattern = new RegExp(`^season\\s*0?${season}\\/?$|^s0?${season}\\/?$`, 'i')
+        const sPattern = new RegExp(`season\\s*0?${season}\\b|s0?${season}\\b`, 'i')
         let targetFolder = folderLinks.find(f => sPattern.test(f.text.trim()))
 
         let targetHtml = dirHtml
@@ -362,15 +336,19 @@ export default function Player() {
           const epText = epMatch[2]
           
           if (isVideo(epHref)) {
-             if (ePattern.test(epText)) {
+             // Decode href to ensure we match the full un-truncated file name.
+             const decodedHref = decodeURIComponent(epHref)
+             if (ePattern.test(decodedHref) || ePattern.test(epText)) {
                 const filePageUrl = epHref.startsWith('http') ? epHref : targetUrl + epHref
                 
-                setLoadStep(`Extracting direct download link for ${epText}…`); setLoadPct(70)
-                const directUrl = await getDirectLinkFromPage(filePageUrl)
+                setLoadStep(`Establishing direct stream…`); setLoadPct(80)
+                const directUrl = getDirectAlistUrl(filePageUrl)
                 
                 allStreams.push({
-                  url: directUrl, title: epText, quality: detectQuality(epText) || 'HD',
-                  langInfo: detectLang(epText) || { lang: 'English', code: 'en', flag: '🇺🇸' },
+                  url: directUrl, 
+                  title: decodeURIComponent(epHref), 
+                  quality: detectQuality(decodedHref) || 'HD',
+                  langInfo: detectLang(decodedHref) || { lang: 'English', code: 'en', flag: '🇺🇸' },
                   isHls: false, sourceLabel: 'Index Search'
                 })
              }
@@ -381,7 +359,7 @@ export default function Player() {
         let targetFiles = rootFiles;
         let targetDirUrl = directoryUrl;
 
-        // Fallback: If no files are in the main movie folder, check the first subfolder
+        // Fallback: If no video files are in the main movie folder, check the first subfolder
         if (targetFiles.length === 0 && folderLinks.length > 0) {
           targetDirUrl = directoryUrl + folderLinks[0].href;
           const subRes = await fetch(`/api/proxy?url=${encodeURIComponent(targetDirUrl)}`);
@@ -402,12 +380,15 @@ export default function Player() {
            const file = targetFiles[i]
            const filePageUrl = file.href.startsWith('http') ? file.href : targetDirUrl + file.href
            
-           setLoadStep(`Extracting direct download link (${i+1}/${targetFiles.length})…`); setLoadPct(70)
-           const directUrl = await getDirectLinkFromPage(filePageUrl)
+           setLoadStep(`Establishing direct stream (${i+1}/${targetFiles.length})…`); setLoadPct(80)
+           const decodedHref = decodeURIComponent(file.href)
+           const directUrl = getDirectAlistUrl(filePageUrl)
 
            allStreams.push({
-              url: directUrl, title: file.text, quality: detectQuality(file.text) || 'HD',
-              langInfo: detectLang(file.text) || { lang: 'English', code: 'en', flag: '🇺🇸' },
+              url: directUrl, 
+              title: decodedHref, 
+              quality: detectQuality(decodedHref) || 'HD',
+              langInfo: detectLang(decodedHref) || { lang: 'English', code: 'en', flag: '🇺🇸' },
               isHls: false, sourceLabel: 'Index Search'
            })
         }
