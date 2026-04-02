@@ -85,7 +85,7 @@ export default function Player() {
   const [openPanel,     setOpenPanel]     = useState(null)
   const [loadState,     setLoadState]     = useState('loading')
   const [errorMsg,      setErrorMsg]      = useState('')
-  const [loadStep,      setLoadStep]      = useState('Connecting to servers...')
+  const [loadStep,      setLoadStep]      = useState('Connecting to MediaFusion...')
   const [loadProgress,  setLoadProgress]  = useState(0)
   const [title,         setTitle]         = useState('')
   const [season] = useState(1)
@@ -104,9 +104,9 @@ export default function Player() {
     hideTimer.current = setTimeout(() => { setShowUI(false); setOpenPanel(null) }, 4500)
   }, [])
 
-  // ── 1. Fetch from MediaFusion & Fallbacks ─────────────────────────────────
+  // ── 1. Fetch EXCLUSIVELY from MediaFusion ─────────────────────────────────
   const fetchSources = useCallback(async () => {
-    setLoadState('loading'); setLoadProgress(15); setLoadStep('Resolving Title IDs...');
+    setLoadState('loading'); setLoadProgress(20); setLoadStep('Resolving Title IDs...');
     
     // MediaFusion prefers IMDb IDs heavily for its catalog scraping.
     let streamId = type === 'tv' ? `tmdb:${id}:${season}:${episode}` : `tmdb:${id}`
@@ -121,42 +121,20 @@ export default function Player() {
     const stremioType = type === 'tv' ? 'series' : 'movie'
     let allStreams = []
 
-    // 1. Fetch MediaFusion
-    setLoadProgress(30); setLoadStep('Querying MediaFusion Catalogs...')
+    // Fetch ONLY from MediaFusion
+    setLoadProgress(50); setLoadStep('Querying MediaFusion Catalog...')
     try {
       const mfUrl = `https://mediafusion.elfhosted.com/stream/${stremioType}/${streamId}.json`
-      const resp = await fetch(mfUrl, { signal: AbortSignal.timeout(8000) })
+      const resp = await fetch(mfUrl, { signal: AbortSignal.timeout(10000) })
       if (resp.ok) {
         const data = await resp.json()
-        // MediaFusion returns infoHash for torrents, and occasionally direct URLs
         const validMF = (data?.streams || []).filter(s => s.infoHash || s.url)
-        allStreams = [...allStreams, ...validMF.map(s => ({ ...s, source: 'MediaFusion' }))]
+        allStreams = validMF.map(s => ({ ...s, source: 'MediaFusion' }))
       }
     } catch (e) { console.error("MediaFusion fetch failed", e) }
 
-    setLoadProgress(60); setLoadStep('Scanning HTTP Backup Providers...')
-
-    // 2. Fetch HLS Fallbacks (Stremify/WebStreamr) 
-    // Needed to ensure playback works if the user's local Stremio torrent engine isn't running
-    const FALLBACKS = ['https://stremify.hayd.uk', 'https://webstreamr.hayd.uk']
-    for (const base of FALLBACKS) {
-      try {
-        const targetUrl = `${base}/stream/${stremioType}/${streamId}.json`
-        const proxyUrl  = `/api/proxy?url=${encodeURIComponent(targetUrl)}`
-        const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(6000) })
-        if (resp.ok) {
-          const text = await resp.text()
-          if (!text.trimStart().startsWith('<')) {
-            const data = JSON.parse(text)
-            const valid = (data?.streams || []).filter(s => s.url)
-            allStreams = [...allStreams, ...valid.map(s => ({ ...s, source: new URL(base).hostname }))]
-          }
-        }
-      } catch (err) {}
-    }
-
     if (allStreams.length === 0) {
-      setLoadState('error'); setErrorMsg('No streams found on MediaFusion or backup servers. Please try again later.'); return
+      setLoadState('error'); setErrorMsg('No streams found on MediaFusion. Please try a different title or try again later.'); return
     }
 
     setLoadProgress(80); setLoadStep('Prioritizing MULTI-Audio & Formats...')
@@ -172,9 +150,6 @@ export default function Player() {
       if (t.includes('tam') || t.includes('tel')) score += 1000 // MediaFusion is strong in Indian regional
       if (t.includes('eng')) score += 500
 
-      // Priority for MediaFusion Source
-      if (s.source === 'MediaFusion') score += 300
-      
       // Resolution Priority
       if (t.includes('1080p')) score += 40
       if (t.includes('720p')) score += 20
@@ -215,7 +190,7 @@ export default function Player() {
         const fileIdx = stream.fileIdx || 0
         targetUrl = `${LOCAL_TORRENT_ENGINE}/${stream.infoHash}/${fileIdx}`
       } else {
-        // Handle standard HTTP / HLS streams
+        // Handle direct HTTP streams if MediaFusion provides them
         const isM3U8 = /\.m3u8/i.test(stream.url) || stream.url.includes('.m3u8')
         targetUrl = isM3U8 ? `/api/proxy?url=${encodeURIComponent(stream.url)}` : stream.url
       }
@@ -235,7 +210,7 @@ export default function Player() {
         return
       }
 
-      // HLS.js Path for fallbacks
+      // HLS.js Path (Only triggers if MediaFusion returns an actual .m3u8 URL)
       const hls = new Hls({ enableWorker: true, lowLatencyMode: false, xhrSetup: xhr => { xhr.withCredentials = false } })
       hlsRef.current = hls
       hls.attachMedia(video)
@@ -342,7 +317,7 @@ export default function Player() {
                 {openPanel === 'audio' && (
                   <motion.div style={panelStyle}>
                     <div style={{padding:'16px 20px', borderBottom:`1px solid ${C.panelBorder}`, color:'#fff', fontWeight:600}}><button onClick={() => setOpenPanel('settings')} style={{background:'none',border:'none',color:'#fff',marginRight:10}}><IconChevronLeft/></button> Multi-Audio Tracks</div>
-                    {audioTracks.length === 0 ? <div style={{padding:20, color:C.textSec, fontSize:13}}>Audio switching requires HLS, Safari, or a compliant local torrent engine (MKV Demuxing). This track is locked.</div> 
+                    {audioTracks.length === 0 ? <div style={{padding:20, color:C.textSec, fontSize:13}}>Audio switching requires Safari or a compliant local torrent engine (MKV Demuxing). This track is locked.</div> 
                     : audioTracks.map(t => (
                       <div key={t.id} onClick={() => switchAudio(t.id)} style={{padding:'14px 20px', display:'flex', cursor:'pointer', borderBottom:`1px solid ${C.panelBorder}`, color:'#fff'}}>
                         <RadioCircle selected={t.id === activeAudio}/><span style={{marginLeft:12}}>{t.label}</span>
@@ -354,7 +329,7 @@ export default function Player() {
                 {/* SOURCES PANEL */}
                 {openPanel === 'sources' && (
                    <motion.div style={panelStyle}>
-                    <div style={{padding:'16px 20px', borderBottom:`1px solid ${C.panelBorder}`, color:'#fff', fontWeight:600}}><button onClick={() => setOpenPanel('settings')} style={{background:'none',border:'none',color:'#fff',marginRight:10}}><IconChevronLeft/></button> Sources</div>
+                    <div style={{padding:'16px 20px', borderBottom:`1px solid ${C.panelBorder}`, color:'#fff', fontWeight:600}}><button onClick={() => setOpenPanel('settings')} style={{background:'none',border:'none',color:'#fff',marginRight:10}}><IconChevronLeft/></button> MediaFusion Sources</div>
                     <div style={{maxHeight: 400, overflowY: 'auto'}}>
                       {sources.map((s, i) => (
                         <div key={i} onClick={() => { setActiveSource(i); setOpenPanel(null); }} style={{padding:'14px 20px', display:'flex', alignItems:'flex-start', cursor:'pointer', borderBottom:`1px solid ${C.panelBorder}`, color:'#fff'}}>
@@ -362,7 +337,7 @@ export default function Player() {
                           <div style={{marginLeft:12, overflow:'hidden', display: 'flex', flexDirection: 'column', gap: 4}}>
                             <div style={{fontSize:14, fontWeight:500}}>{s.name || s.title}</div>
                             {s.description && <div style={{fontSize:12, color:C.textSec, whiteSpace:'pre-wrap'}}>{s.description}</div>}
-                            <div style={{fontSize:11, color:C.accent, fontWeight:600}}>{s.source} {s.infoHash ? '(P2P/Torrent)' : '(HTTP Direct)'}</div>
+                            <div style={{fontSize:11, color:C.accent, fontWeight:600}}>MediaFusion {s.infoHash ? '(P2P/Torrent)' : '(HTTP Direct)'}</div>
                           </div>
                         </div>
                       ))}
