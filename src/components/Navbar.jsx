@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Bell, User, X } from 'lucide-react';
+import { Search, Bell, User } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 const Navbar = () => {
@@ -29,9 +29,7 @@ const Navbar = () => {
     e.preventDefault();
     if (searchQuery.trim()) {
       setIsSearchOpen(false);
-      // Route to a search results page (ensure you create this route in App.jsx if needed)
       navigate(`/search?q=${encodeURIComponent(searchQuery)}`);
-      setSearchQuery('');
     }
   };
 
@@ -98,7 +96,6 @@ const Navbar = () => {
           </div>
 
           <div className="flex items-center gap-6 text-gray-300">
-            {/* Search Trigger */}
             <Search 
               className="w-5 h-5 cursor-pointer hover:text-white transition-colors" 
               onClick={() => setIsSearchOpen(true)}
@@ -109,51 +106,113 @@ const Navbar = () => {
         </div>
       </nav>
 
-      {/* Search Modal Overlay */}
+      {/* Glassmorphic Search Modal Overlay */}
       {isSearchOpen && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-50 flex justify-center items-start pt-[10vh] bg-black/60 backdrop-blur-sm px-4"
           onClick={() => setIsSearchOpen(false)}
         >
-          {/* Modal Container */}
+          {/* Modal Container - Glassmorphism applied here */}
           <div 
-            className="bg-[#00050D] border border-white/10 w-full max-w-3xl rounded-2xl p-8 shadow-[0_0_40px_rgba(0,168,225,0.1)] relative transform transition-all"
+            className="w-full max-w-[900px] flex flex-col gap-5 rounded-2xl p-6 md:p-8 bg-[#1b2530]/60 backdrop-blur-xl border border-white/10 shadow-[0_10px_40px_rgba(0,0,0,0.8)]"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Close Button */}
-            <button 
-              onClick={() => setIsSearchOpen(false)}
-              className="absolute top-6 right-6 text-gray-400 hover:text-white transition-colors bg-white/5 hover:bg-white/10 rounded-full p-2"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <h2 className="text-3xl font-bold text-white mb-8 text-center">Search apex<span className="text-primeBlue">videos</span></h2>
-
-            {/* Search Form - Styled like an upload/drop zone */}
+            {/* Search Input Area */}
             <form 
-              onSubmit={handleSearchSubmit} 
-              className="relative group flex flex-col items-center justify-center p-10 border-2 border-dashed border-gray-600 focus-within:border-primeBlue focus-within:bg-primeBlue/5 rounded-2xl transition-all duration-300"
+              onSubmit={handleSearchSubmit}
+              className="flex items-center border border-white/20 rounded-xl px-4 py-3 bg-[#1b2530]/40 focus-within:border-primeBlue/60 focus-within:bg-[#1b2530]/60 transition-all duration-300"
             >
-              <Search className="w-12 h-12 text-gray-500 group-focus-within:text-primeBlue mb-6 transition-colors" />
-              
+              <Search className="w-6 h-6 text-white/70 mr-4" />
               <input 
-                type="text"
+                type="text" 
                 autoFocus
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Type to search movies, shows, and more..."
-                className="w-full text-center bg-transparent border-none outline-none text-white text-2xl md:text-3xl placeholder-gray-600 mb-8"
+                placeholder="Search" 
+                className="flex-grow bg-transparent border-none text-white text-lg md:text-xl outline-none placeholder-gray-400"
               />
-
-              <button 
-                type="submit"
-                className="bg-primeBlue hover:bg-[#0096c8] text-white px-10 py-4 rounded-full font-semibold text-lg tracking-wide transition-all duration-300 shadow-[0_0_20px_rgba(0,168,225,0.3)] hover:shadow-[0_0_30px_rgba(0,168,225,0.5)] flex items-center gap-2"
-              >
-                <Search className="w-5 h-5" />
-                Find Content
-              </button>
+              {searchQuery && (
+                <button 
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="text-white/80 hover:text-white text-sm font-medium px-2 hover:underline focus:outline-none"
+                >
+                  Clear
+                </button>
+              )}
             </form>
+
+            {/* Text Suggestions */}
+            <div className="flex flex-col gap-4 px-2 mt-2">
+              <div 
+                className="text-base font-semibold text-white cursor-pointer hover:text-gray-300 transition-colors"
+                onClick={() => setSearchQuery('The Summer I Turned Pretty')}
+              >
+                The Summer I Turned Pretty
+              </div>
+              <div 
+                className="text-base font-semibold text-white cursor-pointer hover:text-gray-300 transition-colors"
+                onClick={() => setSearchQuery('The Summer I Turned Pretty: Cousins Beach Yule Log')}
+              >
+                The Summer I Turned Pretty: Cousins Beach Yule Log
+              </div>
+            </div>
+
+            {/* Card Suggestions Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+              {/* Card 1 */}
+              <div className="flex flex-col gap-2 cursor-pointer group">
+                <div className="relative w-full pt-[56.25%] rounded-lg overflow-hidden bg-gray-800">
+                  <img 
+                    src="https://images.unsplash.com/photo-1519046904884-53103b34b206?auto=format&fit=crop&w=400&q=80" 
+                    alt="The Summer I Turned Pretty" 
+                    className="absolute top-0 left-0 w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-300"
+                  />
+                </div>
+                <div className="text-sm font-semibold text-white line-clamp-2">The Summer I Turned Pretty</div>
+                <div className="text-xs text-gray-400">2022</div>
+              </div>
+
+              {/* Card 2 */}
+              <div className="flex flex-col gap-2 cursor-pointer group">
+                <div className="relative w-full pt-[56.25%] rounded-lg overflow-hidden bg-gray-800">
+                  <img 
+                    src="https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=400&q=80" 
+                    alt="The Map That Leads to You" 
+                    className="absolute top-0 left-0 w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-300"
+                  />
+                </div>
+                <div className="text-sm font-semibold text-white line-clamp-2">The Map That Leads to You</div>
+                <div className="text-xs text-gray-400">2025 • 1 h 38 min</div>
+              </div>
+
+              {/* Card 3 */}
+              <div className="flex flex-col gap-2 cursor-pointer group">
+                <div className="relative w-full pt-[56.25%] rounded-lg overflow-hidden bg-gray-800">
+                  <img 
+                    src="https://images.unsplash.com/photo-1504681869696-d977211a5f4c?auto=format&fit=crop&w=400&q=80" 
+                    alt="I Know What You Did Last Summer" 
+                    className="absolute top-0 left-0 w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-300"
+                  />
+                </div>
+                <div className="text-sm font-semibold text-white line-clamp-2">I Know What You Did Last Summer</div>
+                <div className="text-xs text-gray-400">2021</div>
+              </div>
+
+              {/* Card 4 */}
+              <div className="flex flex-col gap-2 cursor-pointer group">
+                <div className="relative w-full pt-[56.25%] rounded-lg overflow-hidden bg-gray-800">
+                  <img 
+                    src="https://images.unsplash.com/photo-1513297887119-d46091b24bfa?auto=format&fit=crop&w=400&q=80" 
+                    alt="The Summer I Turned Pretty: Cousins Beach..." 
+                    className="absolute top-0 left-0 w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-300"
+                  />
+                </div>
+                <div className="text-sm font-semibold text-white line-clamp-2">The Summer I Turned Pretty: Cousins Beach...</div>
+                <div className="text-xs text-gray-400">2025</div>
+              </div>
+            </div>
+            
           </div>
         </div>
       )}
