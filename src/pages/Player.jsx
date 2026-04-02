@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { RefreshCw, AlertCircle, Key } from 'lucide-react'
+import { RefreshCw, AlertCircle } from 'lucide-react'
 
 const BASE_URL = 'https://api.themoviedb.org/3'
 const API_KEY  = import.meta.env.VITE_TMDB_API_KEY
@@ -49,6 +49,9 @@ const IconPause = () => <svg viewBox="0 0 24 24" fill="currentColor" style={{wid
 
 const ICON_BTN = { background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: '8px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.15s' }
 
+// Local Stremio Engine Port (Required to convert MediaFusion P2P InfoHashes into HTTP video for browsers)
+const LOCAL_TORRENT_ENGINE = 'http://127.0.0.1:11470'
+
 export default function Player() {
   const { type = 'movie', id } = useParams()
   const navigate = useNavigate()
@@ -58,9 +61,6 @@ export default function Player() {
   const containerRef = useRef(null)
   const seekTrackRef = useRef(null)
   const hideTimer    = useRef(null)
-
-  // Real-Debrid config state
-  const [rdKey,         setRdKey]         = useState(localStorage.getItem('rd_key') || '')
 
   // Playback state
   const [playing,       setPlaying]       = useState(false)
@@ -104,10 +104,11 @@ export default function Player() {
     hideTimer.current = setTimeout(() => { setShowUI(false); setOpenPanel(null) }, 4500)
   }, [])
 
-  // ── 1. Fetch from Torrentio & Fallbacks ─────────────────────────────────
+  // ── 1. Fetch from MediaFusion & Fallbacks ─────────────────────────────────
   const fetchSources = useCallback(async () => {
-    setLoadState('loading'); setLoadProgress(20); setLoadStep('Searching Torrentio...');
+    setLoadState('loading'); setLoadProgress(15); setLoadStep('Resolving Title IDs...');
     
+    // MediaFusion prefers IMDb IDs heavily for its catalog scraping.
     let streamId = type === 'tv' ? `tmdb:${id}:${season}:${episode}` : `tmdb:${id}`
     try {
       const extRes = await fetch(`${BASE_URL}/${type}/${id}/external_ids?api_key=${API_KEY}`)
@@ -120,25 +121,23 @@ export default function Player() {
     const stremioType = type === 'tv' ? 'series' : 'movie'
     let allStreams = []
 
-    // 1. Fetch Torrentio (with or without Real-Debrid)
+    // 1. Fetch MediaFusion
+    setLoadProgress(30); setLoadStep('Querying MediaFusion Catalogs...')
     try {
-      const torrentioBase = rdKey 
-        ? `https://torrentio.strem.fun/realdebrid=${rdKey}` 
-        : `https://torrentio.strem.fun`
-      
-      const torrentioUrl = `${torrentioBase}/stream/${stremioType}/${streamId}.json`
-      const resp = await fetch(torrentioUrl)
+      const mfUrl = `https://mediafusion.elfhosted.com/stream/${stremioType}/${streamId}.json`
+      const resp = await fetch(mfUrl, { signal: AbortSignal.timeout(8000) })
       if (resp.ok) {
         const data = await resp.json()
-        // If RD key is active, filter for actual HTTP URLs. If not, infoHashes exist but browser can't play them natively.
-        const validTio = (data?.streams || []).filter(s => rdKey ? s.url : s.infoHash)
-        allStreams = [...allStreams, ...validTio.map(s => ({ ...s, source: 'Torrentio' }))]
+        // MediaFusion returns infoHash for torrents, and occasionally direct URLs
+        const validMF = (data?.streams || []).filter(s => s.infoHash || s.url)
+        allStreams = [...allStreams, ...validMF.map(s => ({ ...s, source: 'MediaFusion' }))]
       }
-    } catch (e) { console.error("Torrentio fetch failed", e) }
+    } catch (e) { console.error("MediaFusion fetch failed", e) }
 
-    setLoadProgress(60); setLoadStep('Scanning Backup HLS Providers...')
+    setLoadProgress(60); setLoadStep('Scanning HTTP Backup Providers...')
 
-    // 2. Fetch HLS Fallbacks (Stremify/WebStreamr) for Native Audio Switching in Chrome
+    // 2. Fetch HLS Fallbacks (Stremify/WebStreamr) 
+    // Needed to ensure playback works if the user's local Stremio torrent engine isn't running
     const FALLBACKS = ['https://stremify.hayd.uk', 'https://webstreamr.hayd.uk']
     for (const base of FALLBACKS) {
       try {
@@ -157,39 +156,44 @@ export default function Player() {
     }
 
     if (allStreams.length === 0) {
-      setLoadState('error'); setErrorMsg('No playable streams found. If using Torrentio, please ensure your Real-Debrid API Key is configured in settings.'); return
+      setLoadState('error'); setErrorMsg('No streams found on MediaFusion or backup servers. Please try again later.'); return
     }
 
-    setLoadProgress(80); setLoadStep('Optimizing Stream Qualities...')
+    setLoadProgress(80); setLoadStep('Prioritizing MULTI-Audio & Formats...')
 
-    // SMART SCORING
+    // SMART SCORING FOR MEDIAFUSION MULTI-AUDIO
     const getScore = (s) => {
       let score = 0
-      const t = (s.title || s.name || '').toLowerCase()
-      const url = (s.url || '').toLowerCase()
+      const t = (s.title || s.name || s.description || '').toLowerCase()
       
-      if (s.source === 'Torrentio' && url) score += 2000 // Heavily favor Debrid links
-      if (url.includes('.m3u8')) score += 800 // High priority for HLS (Supports Chrome Audio Switching)
-      if (t.includes('multi') || t.includes('dual')) score += 500
-      if (t.includes('1080p')) score += 40
-      if (t.includes('hevc') || t.includes('x265')) score -= 500 // Browsers struggle with x265 MKV
+      // Extremely High Priority for MULTI, DUAL, or Specific Languages
+      if (t.includes('multi') || t.includes('multi-audio') || t.includes('dual')) score += 2000
+      if (t.includes('hin') || t.includes('hindi')) score += 1500
+      if (t.includes('tam') || t.includes('tel')) score += 1000 // MediaFusion is strong in Indian regional
+      if (t.includes('eng')) score += 500
 
-      // If it's a raw torrent without a URL, it cannot play in a pure browser without a backend
-      if (!s.url && s.infoHash) score -= 5000 
+      // Priority for MediaFusion Source
+      if (s.source === 'MediaFusion') score += 300
+      
+      // Resolution Priority
+      if (t.includes('1080p')) score += 40
+      if (t.includes('720p')) score += 20
+      
+      // Downgrade x265/HEVC heavily because web browsers (especially Chrome/Firefox) cannot hardware decode MKV x265 natively
+      if (t.includes('hevc') || t.includes('x265') || t.includes('h265')) score -= 800 
+      
       return score
     }
 
     allStreams.sort((a, b) => getScore(b) - getScore(a))
     setSources(allStreams); setActiveSource(0)
-  }, [type, id, season, episode, rdKey])
+  }, [type, id, season, episode])
 
   useEffect(() => { fetchSources() }, [fetchSources])
 
   // ── 2. Load Selected Stream ───────────────────────────────────
   const loadVideo = useCallback(async (stream) => {
-    if (!stream || !stream.url) {
-      setLoadState('error'); setErrorMsg('This stream is a raw Torrent (InfoHash). Please add a Real-Debrid API Key in the settings to stream via HTTP.'); return
-    }
+    if (!stream) return
     
     setLoadState('loading'); setLoadStep('Initializing Video Engine...'); setLoadProgress(90)
     setAudioTracks([]); setActiveAudio(-1); setQualities([]); setActiveQuality(-1)
@@ -202,19 +206,36 @@ export default function Player() {
       const Hls = await loadHls()
       if (!video) return
 
-      const isM3U8 = /\.m3u8/i.test(stream.url) || stream.url.includes('.m3u8')
-      const targetUrl = isM3U8 ? `/api/proxy?url=${encodeURIComponent(stream.url)}` : stream.url
+      let targetUrl = ''
 
-      if (!isM3U8 || !Hls || !Hls.isSupported()) {
-        video.src = targetUrl // Direct MKV/MP4 (Debrid)
+      // Handle MediaFusion InfoHash Torrents
+      if (stream.infoHash && !stream.url) {
+        setLoadStep('Bridging to Local Torrent Engine...')
+        // This converts the infoHash into a playable HTTP stream via the local Stremio server
+        const fileIdx = stream.fileIdx || 0
+        targetUrl = `${LOCAL_TORRENT_ENGINE}/${stream.infoHash}/${fileIdx}`
+      } else {
+        // Handle standard HTTP / HLS streams
+        const isM3U8 = /\.m3u8/i.test(stream.url) || stream.url.includes('.m3u8')
+        targetUrl = isM3U8 ? `/api/proxy?url=${encodeURIComponent(stream.url)}` : stream.url
+      }
+
+      // If it's a native playable format (or a local torrent engine HTTP endpoint)
+      if (!targetUrl.includes('.m3u8') || !Hls || !Hls.isSupported()) {
+        video.src = targetUrl
         setLoadState('playing'); setLoadProgress(100)
         video.play().catch(err => {
-          if (err.name !== 'AbortError') { setLoadState('error'); setErrorMsg('Format unsupported. Try selecting an HLS source.') }
+          if (err.name !== 'AbortError') { 
+            setLoadState('error'); 
+            setErrorMsg(stream.infoHash 
+              ? 'Failed to stream MediaFusion torrent. Ensure your local torrent engine (like Stremio Background Service) is running on port 11470.' 
+              : 'Browser rejected this video format. Please select a different stream.'); 
+          }
         })
         return
       }
 
-      // HLS.js Path
+      // HLS.js Path for fallbacks
       const hls = new Hls({ enableWorker: true, lowLatencyMode: false, xhrSetup: xhr => { xhr.withCredentials = false } })
       hlsRef.current = hls
       hls.attachMedia(video)
@@ -239,7 +260,7 @@ export default function Player() {
       hls.on(Hls.Events.LEVEL_SWITCHED, (_, d) => setActiveQuality(hls.autoLevelEnabled ? -1 : d.level))
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (d.fatal && d.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad()
-        else if (d.fatal) { setLoadState('error'); setErrorMsg('Stream failed. Try another source.') }
+        else if (d.fatal) { setLoadState('error'); setErrorMsg('Stream connection closed. Try another source.') }
       })
     } catch (e) { setLoadState('error'); setErrorMsg(e.message) }
   }, [])
@@ -248,15 +269,15 @@ export default function Player() {
 
   useEffect(() => { return () => { if (hlsRef.current) hlsRef.current.destroy() } }, [])
 
-  // ── Browser Native Audio Track Detection (For Safari/Debrid MKV) ─────────────
+  // ── Browser Native Audio Track Detection (For MKV MULTI-Audio) ─────────────
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
     const onLoadedMeta = () => {
       setDuration(v.duration)
-      // Detect native browser audio track support (Safari mostly)
+      // Safari (and heavily modified Chromium browsers) support MKV audio demuxing
       if (!hlsRef.current && v.audioTracks && v.audioTracks.length > 1) {
-        setAudioTracks(Array.from(v.audioTracks).map((t, i) => ({ id: i, label: t.language || `Audio ${i+1}` })))
+        setAudioTracks(Array.from(v.audioTracks).map((t, i) => ({ id: i, label: t.language || `Track ${i+1}` })))
         const defIdx = Array.from(v.audioTracks).findIndex(t => t.enabled)
         setActiveAudio(defIdx !== -1 ? defIdx : 0)
       }
@@ -277,8 +298,8 @@ export default function Player() {
 
   // ── UI Components ────────────────────────────────────────────────────────
   const C = { bg: '#000', panelBg: '#1a1d21', panelBorder: '#2e3239', accent: '#1a98ff', textSec: '#8b8f97' }
-  const panelStyle = { position:'absolute', top:56, right:16, width:340, background:C.panelBg, borderRadius:8, overflow:'hidden', zIndex:100, boxShadow:'0 8px 32px rgba(0,0,0,0.8)' }
-  const RadioCircle = ({ selected }) => <div style={{ width:24, height:24, border: `2px solid ${selected ? C.accent : C.textSec}`, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{selected && <div style={{width:8,height:8,background:'#fff',borderRadius:'50%'}}/>}</div>
+  const panelStyle = { position:'absolute', top:56, right:16, width:380, background:C.panelBg, borderRadius:8, overflow:'hidden', zIndex:100, boxShadow:'0 8px 32px rgba(0,0,0,0.8)' }
+  const RadioCircle = ({ selected }) => <div style={{ width:24, height:24, flexShrink: 0, border: `2px solid ${selected ? C.accent : C.textSec}`, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{selected && <div style={{width:8,height:8,background:'#fff',borderRadius:'50%'}}/>}</div>
 
   return (
     <div ref={containerRef} onMouseMove={resetHide} style={{ position:'fixed', inset:0, background:'#000', zIndex:100, display:'flex', flexDirection:'column', fontFamily:"sans-serif", userSelect:'none' }}>
@@ -292,8 +313,7 @@ export default function Player() {
             <p style={{color:'#fff', fontSize:20, fontWeight:700}}>Stream Error</p>
             <p style={{color:'#888', fontSize:14, maxWidth:400}}>{errorMsg}</p>
             <div style={{display:'flex', gap:12}}>
-              {sources.length > 0 && <button onClick={() => { setOpenPanel('sources'); setLoadState('playing') }} style={{ padding:'10px 24px', background:'#1a98ff', color:'#fff', borderRadius:8, fontWeight:700, border:'none', cursor:'pointer' }}>Change Source</button>}
-              <button onClick={() => setOpenPanel('rd')} style={{ padding:'10px 24px', background:'#333', color:'#fff', borderRadius:8, fontWeight:700, border:'none', cursor:'pointer' }}>Configure Debrid</button>
+              {sources.length > 0 && <button onClick={() => { setOpenPanel('sources'); setLoadState('playing') }} style={{ padding:'10px 24px', background:'#1a98ff', color:'#fff', borderRadius:8, fontWeight:700, border:'none', cursor:'pointer' }}>Try Another Source</button>}
             </div>
           </motion.div>
         )}
@@ -313,29 +333,16 @@ export default function Player() {
                 {openPanel === 'settings' && (
                   <motion.div style={panelStyle}>
                     <div style={{padding:'16px 20px', borderBottom:`1px solid ${C.panelBorder}`, fontWeight:600, color:'#fff'}}>Settings</div>
-                    <div style={{padding:'16px 20px', borderBottom:`1px solid ${C.panelBorder}`, display:'flex', cursor:'pointer', color:'#fff'}} onClick={() => setOpenPanel('sources')}><IconServer/><span style={{marginLeft:12}}>Stream Source</span></div>
-                    <div style={{padding:'16px 20px', borderBottom:`1px solid ${C.panelBorder}`, display:'flex', cursor:'pointer', color:'#fff'}} onClick={() => setOpenPanel('audio')}><IconCC/><span style={{marginLeft:12}}>Audio Tracks</span></div>
-                    <div style={{padding:'16px 20px', display:'flex', cursor:'pointer', color:'#fff'}} onClick={() => setOpenPanel('rd')}><Key style={{width:20, height:20}}/><span style={{marginLeft:12}}>Debrid Integration (Torrentio)</span></div>
-                  </motion.div>
-                )}
-
-                {/* DEBRID PANEL */}
-                {openPanel === 'rd' && (
-                  <motion.div style={panelStyle}>
-                    <div style={{padding:'16px 20px', borderBottom:`1px solid ${C.panelBorder}`, color:'#fff', fontWeight:600, display:'flex'}}><button onClick={() => setOpenPanel('settings')} style={{background:'none',border:'none',color:'#fff',marginRight:10}}><IconChevronLeft/></button> Real-Debrid Config</div>
-                    <div style={{padding:'20px'}}>
-                      <p style={{color:C.textSec, fontSize:13, marginBottom:16}}>Enter your Real-Debrid API Key to unlock direct HTTP streaming for Torrentio.</p>
-                      <input type="password" value={rdKey} onChange={e => setRdKey(e.target.value)} placeholder="Real-Debrid API Key" style={{width:'100%', padding:'10px', borderRadius:6, border:`1px solid ${C.panelBorder}`, background:'#111', color:'#fff', marginBottom:16}} />
-                      <button onClick={() => { localStorage.setItem('rd_key', rdKey); fetchSources(); setOpenPanel(null) }} style={{width:'100%', padding:12, background:C.accent, color:'#fff', border:'none', borderRadius:6, fontWeight:700, cursor:'pointer'}}>Save & Reload Streams</button>
-                    </div>
+                    <div style={{padding:'16px 20px', borderBottom:`1px solid ${C.panelBorder}`, display:'flex', cursor:'pointer', color:'#fff'}} onClick={() => setOpenPanel('sources')}><IconServer/><span style={{marginLeft:12}}>MediaFusion Sources</span></div>
+                    <div style={{padding:'16px 20px', display:'flex', cursor:'pointer', color:'#fff'}} onClick={() => setOpenPanel('audio')}><IconCC/><span style={{marginLeft:12}}>Audio Tracks (Multi)</span></div>
                   </motion.div>
                 )}
 
                 {/* AUDIO PANEL */}
                 {openPanel === 'audio' && (
                   <motion.div style={panelStyle}>
-                    <div style={{padding:'16px 20px', borderBottom:`1px solid ${C.panelBorder}`, color:'#fff', fontWeight:600}}><button onClick={() => setOpenPanel('settings')} style={{background:'none',border:'none',color:'#fff',marginRight:10}}><IconChevronLeft/></button> Audio</div>
-                    {audioTracks.length === 0 ? <div style={{padding:20, color:C.textSec, fontSize:13}}>Audio switching is only supported on HLS streams or in Safari. This is a direct MKV file.</div> 
+                    <div style={{padding:'16px 20px', borderBottom:`1px solid ${C.panelBorder}`, color:'#fff', fontWeight:600}}><button onClick={() => setOpenPanel('settings')} style={{background:'none',border:'none',color:'#fff',marginRight:10}}><IconChevronLeft/></button> Multi-Audio Tracks</div>
+                    {audioTracks.length === 0 ? <div style={{padding:20, color:C.textSec, fontSize:13}}>Audio switching requires HLS, Safari, or a compliant local torrent engine (MKV Demuxing). This track is locked.</div> 
                     : audioTracks.map(t => (
                       <div key={t.id} onClick={() => switchAudio(t.id)} style={{padding:'14px 20px', display:'flex', cursor:'pointer', borderBottom:`1px solid ${C.panelBorder}`, color:'#fff'}}>
                         <RadioCircle selected={t.id === activeAudio}/><span style={{marginLeft:12}}>{t.label}</span>
@@ -348,13 +355,14 @@ export default function Player() {
                 {openPanel === 'sources' && (
                    <motion.div style={panelStyle}>
                     <div style={{padding:'16px 20px', borderBottom:`1px solid ${C.panelBorder}`, color:'#fff', fontWeight:600}}><button onClick={() => setOpenPanel('settings')} style={{background:'none',border:'none',color:'#fff',marginRight:10}}><IconChevronLeft/></button> Sources</div>
-                    <div style={{maxHeight: 300, overflowY: 'auto'}}>
+                    <div style={{maxHeight: 400, overflowY: 'auto'}}>
                       {sources.map((s, i) => (
-                        <div key={i} onClick={() => { setActiveSource(i); setOpenPanel(null); }} style={{padding:'14px 20px', display:'flex', cursor:'pointer', borderBottom:`1px solid ${C.panelBorder}`, color:'#fff'}}>
+                        <div key={i} onClick={() => { setActiveSource(i); setOpenPanel(null); }} style={{padding:'14px 20px', display:'flex', alignItems:'flex-start', cursor:'pointer', borderBottom:`1px solid ${C.panelBorder}`, color:'#fff'}}>
                           <RadioCircle selected={i === activeSource}/>
-                          <div style={{marginLeft:12, overflow:'hidden'}}>
-                            <div style={{fontSize:14, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{s.title || s.name}</div>
-                            <div style={{fontSize:11, color:C.accent}}>{s.source} {s.url?.includes('.m3u8') ? '(HLS)' : '(Direct)'}</div>
+                          <div style={{marginLeft:12, overflow:'hidden', display: 'flex', flexDirection: 'column', gap: 4}}>
+                            <div style={{fontSize:14, fontWeight:500}}>{s.name || s.title}</div>
+                            {s.description && <div style={{fontSize:12, color:C.textSec, whiteSpace:'pre-wrap'}}>{s.description}</div>}
+                            <div style={{fontSize:11, color:C.accent, fontWeight:600}}>{s.source} {s.infoHash ? '(P2P/Torrent)' : '(HTTP Direct)'}</div>
                           </div>
                         </div>
                       ))}
