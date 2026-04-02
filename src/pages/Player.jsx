@@ -2,7 +2,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // INDEX SEARCH ENGINE
 // Locates specific folders in the 111477.xyz open directory index based on 
-// exact logic, then parses the contents to feed into the custom video player.
+// exact logic, dives into Season folders for TV shows, and parses the 
+// SXXEXX formatted contents to feed into the custom video player.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
@@ -104,7 +105,11 @@ const Dot = ({ on }) => (
 
 // ─── Player ───────────────────────────────────────────────────────────────────
 export default function Player() {
-  const { type = 'movie', id } = useParams()
+  // Extract proper params from the route
+  const { type = 'movie', id, season: paramSeason, episode: paramEpisode } = useParams()
+  const season = paramSeason || 1
+  const episode = paramEpisode || 1
+
   const navigate = useNavigate()
 
   const videoRef    = useRef(null)
@@ -144,9 +149,6 @@ export default function Player() {
   const [loadStep, setLoadStep] = useState('Connecting…')
   const [loadPct,  setLoadPct]  = useState(0)
   const [title,    setTitle]    = useState('')
-  
-  const [season]  = useState(1) // Default values; logic extracts correctly if provided
-  const [episode] = useState(1)
 
   const resetHide = useCallback(() => {
     setShowUI(true)
@@ -212,14 +214,14 @@ export default function Player() {
       const tmdbRes = await fetch(`${BASE_URL}/${type}/${id}?api_key=${API_KEY}&language=en-US`);
       if (!tmdbRes.ok) throw new Error("TMDB Metadata Error");
       mediaItem = await tmdbRes.json();
-      setTitle(mediaItem.title || mediaItem.name || '');
+      
+      const epLabel = type === 'tv' ? ` (S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')})` : ''
+      setTitle((mediaItem.title || mediaItem.name || '') + epLabel);
     } catch(err) {
       setLoadState('error'); setErrorMsg('Failed to fetch media data.'); return;
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    // EXACT MATCHING LOGIC REQUESTED
-    // ────────────────────────────────────────────────────────────────────────
+    // Exact Match Function to locate the primary directory
     async function findIndexFolder(mediaItem, mediaType) {
       const itemTitle = mediaItem.title || mediaItem.name;
       const releaseDate = mediaItem.release_date || mediaItem.first_air_date || '';
@@ -251,49 +253,30 @@ export default function Player() {
         const normText = normalize(text);
 
         if (mediaType === 'movie') {
-          if (normText.includes(searchKey) && normText.includes(year)) {
-            bestLink = href;
-            break;
-          }
-          if (normText.includes(searchKey)) {
-            if (!bestLink) bestLink = href;
-          }
+          if (normText.includes(searchKey) && normText.includes(year)) { bestLink = href; break; }
+          if (normText.includes(searchKey)) { if (!bestLink) bestLink = href; }
         } else {
-          if (normText === searchKey) {
-            bestLink = href;
-            break;
-          }
-          if (normText.includes(searchKey)) {
-            if (!bestLink) bestLink = href;
-          }
+          if (normText === searchKey) { bestLink = href; break; }
+          if (normText.includes(searchKey)) { if (!bestLink) bestLink = href; }
         }
       }
 
       let finalUrl = '';
       if (bestLink) {
-        if (bestLink.startsWith('http')) finalUrl = bestLink;
-        else finalUrl = baseUrl + bestLink;
+        finalUrl = bestLink.startsWith('http') ? bestLink : baseUrl + bestLink;
       } else {
         if (mediaType === 'tv') finalUrl = baseUrl + encodeURIComponent(itemTitle) + '/';
         else finalUrl = baseUrl + encodeURIComponent(itemTitle + " (" + year + ")") + '/';
       }
 
       if (!finalUrl.endsWith('/')) finalUrl += '/';
-
-      return [{
-        source: "111477 Index",
-        label: mediaType === 'movie' ? "Open Movie Index" : "Open Series Index",
-        url: finalUrl,
-        type: "external"
-      }];
+      return finalUrl;
     }
-    // ────────────────────────────────────────────────────────────────────────
 
     setLoadStep('Locating index directory…'); setLoadPct(30)
     let directoryUrl;
     try {
-      const indexResults = await findIndexFolder(mediaItem, type);
-      directoryUrl = indexResults[0].url;
+      directoryUrl = await findIndexFolder(mediaItem, type);
     } catch(err) {
       setLoadState('error'); setErrorMsg('Failed to search index directory.'); return;
     }
@@ -301,7 +284,7 @@ export default function Player() {
     setLoadStep('Scraping folder for media files…'); setLoadPct(60)
     let allStreams = [];
 
-    // Custom folder parser to grab actual .mp4 / .mkv files for the video player
+    // Folder and File Parser
     try {
       const dirRes = await fetch(`/api/proxy?url=${encodeURIComponent(directoryUrl)}`);
       const dirHtml = await dirRes.text();
@@ -309,6 +292,7 @@ export default function Player() {
       const fileRegex = /<a href="([^"]+)">([^<]+)<\/a>/g;
       let fileMatch;
       let folderLinks = [];
+      let rootFiles = [];
 
       while ((fileMatch = fileRegex.exec(dirHtml)) !== null) {
         const fHref = fileMatch[1];
@@ -316,45 +300,57 @@ export default function Player() {
         if (fHref === '../' || fText === 'Name' || fText === 'Size') continue;
 
         if (fHref.endsWith('.mp4') || fHref.endsWith('.mkv') || fHref.endsWith('.webm')) {
-          if (type === 'movie' || (type === 'tv' && new RegExp(`s0?${season}e0?${episode}\\b`, 'i').test(fText))) {
-            const fileUrl = fHref.startsWith('http') ? fHref : directoryUrl + fHref;
-            allStreams.push({
-              url: fileUrl, title: fText, quality: detectQuality(fText) || 'HD',
-              langInfo: detectLang(fText) || { lang: 'English', code: 'en', flag: '🇺🇸' },
-              isHls: false, sourceLabel: 'Index Search'
-            });
-          }
+          rootFiles.push({ href: fHref, text: fText });
         } else if (fHref.endsWith('/')) {
           folderLinks.push({ href: fHref, text: fText });
         }
       }
 
-      // Dive into specific season folders for TV shows
-      if (type === 'tv' && folderLinks.length > 0) {
-        const sPattern = new RegExp(`s0?${season}\\b|season\\s*0?${season}\\b`, 'i');
-        let targetFolder = folderLinks.find(f => sPattern.test(f.text));
-        
-        if (targetFolder) {
-          const sfUrl = directoryUrl + targetFolder.href;
-          const sfRes = await fetch(`/api/proxy?url=${encodeURIComponent(sfUrl)}`);
-          const sfHtml = await sfRes.text();
+      if (type === 'tv') {
+        // TV Shows: Prioritize finding the "Season X" folder
+        const sPattern = new RegExp(`^season\\s*0?${season}\\/?$|^s0?${season}\\/?$`, 'i');
+        let targetFolder = folderLinks.find(f => sPattern.test(f.text.trim()));
 
-          let sfMatch;
-          while ((sfMatch = fileRegex.exec(sfHtml)) !== null) {
-            const sfHref = sfMatch[1];
-            const sfText = sfMatch[2];
-            if (sfHref.endsWith('.mp4') || sfHref.endsWith('.mkv') || sfHref.endsWith('.webm')) {
-              const ePattern = new RegExp(`e0?${episode}\\b`, 'i');
-              if (ePattern.test(sfText)) {
-                const fileUrl = sfHref.startsWith('http') ? sfHref : sfUrl + sfHref;
+        let targetHtml = dirHtml;
+        let targetUrl = directoryUrl;
+
+        // If Season folder exists, dive into it
+        if (targetFolder) {
+          targetUrl = directoryUrl + targetFolder.href;
+          const sfRes = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
+          targetHtml = await sfRes.text();
+        }
+
+        // Parse targetHtml (either Season folder or root folder) for episode files
+        const epRegex = /<a href="([^"]+)">([^<]+)<\/a>/g;
+        let epMatch;
+        // Matches typical naming conventions: S01E01, s1e1, 1x01, 01x01
+        const ePattern = new RegExp(`[sS]0?${season}[eE]0?${episode}\\b|\\b0?${season}x0?${episode}\\b`, 'i');
+
+        while ((epMatch = epRegex.exec(targetHtml)) !== null) {
+          const epHref = epMatch[1];
+          const epText = epMatch[2];
+          
+          if (epHref.endsWith('.mp4') || epHref.endsWith('.mkv') || epHref.endsWith('.webm')) {
+             if (ePattern.test(epText)) {
+                const fileUrl = epHref.startsWith('http') ? epHref : targetUrl + epHref;
                 allStreams.push({
-                  url: fileUrl, title: sfText, quality: detectQuality(sfText) || 'HD',
-                  langInfo: detectLang(sfText) || { lang: 'English', code: 'en', flag: '🇺🇸' },
+                  url: fileUrl, title: epText, quality: detectQuality(epText) || 'HD',
+                  langInfo: detectLang(epText) || { lang: 'English', code: 'en', flag: '🇺🇸' },
                   isHls: false, sourceLabel: 'Index Search'
                 });
-              }
-            }
+             }
           }
+        }
+      } else {
+        // Movies: Parse directly from root
+        for (const file of rootFiles) {
+           const fileUrl = file.href.startsWith('http') ? file.href : directoryUrl + file.href;
+           allStreams.push({
+              url: fileUrl, title: file.text, quality: detectQuality(file.text) || 'HD',
+              langInfo: detectLang(file.text) || { lang: 'English', code: 'en', flag: '🇺🇸' },
+              isHls: false, sourceLabel: 'Index Search'
+           });
         }
       }
     } catch (err) {
@@ -362,7 +358,7 @@ export default function Player() {
     }
 
     if (!allStreams.length) {
-      setLoadState('error'); setErrorMsg(`No playable streams found at directory: ${directoryUrl}`); return;
+      setLoadState('error'); setErrorMsg(`No playable streams found for Season ${season} Episode ${episode}.`); return;
     }
 
     // Grouping by language for audio-switching
@@ -473,13 +469,6 @@ export default function Player() {
     }, 500)
   }, [loadStream])
 
-  const switchHlsLevel = useCallback((level) => {
-    const hls = hlsRef.current; if (!hls) return
-    hls.currentLevel = level.id; hls.autoLevelEnabled = level.id === -1
-    setActiveLevel(level.id)
-  }, [])
-
-  const switchCap = (i) => { setActiveCap(i) }
   const setSpd = r => { if(videoRef.current) videoRef.current.playbackRate=r; setSpeed(r) }
 
   const pP  = duration ? (current/duration)*100 : 0
@@ -491,7 +480,6 @@ export default function Player() {
 
   const langLabel = activeLang ? `${activeLang.flag} ${activeLang.lang}` : 'Auto'
   const qualLabel = activeStream?.quality || (hlsLevels.find(l=>l.id===activeLevel)?.label) || 'Auto'
-  const capLabel  = activeCap===-1?'Off':(captions[activeCap]?.label||'On')
   const spdLabel  = speed===1?'Normal':`${speed}×`
 
   const PS = { position:'absolute', top:56, right:16, width:340, background:C.panelBg, borderRadius:10, overflow:'hidden', overflowY:'auto', maxHeight:'80vh', zIndex:100, boxShadow:'0 8px 40px rgba(0,0,0,0.9)' }
@@ -641,7 +629,28 @@ export default function Player() {
                 )}
               </AnimatePresence>
 
-              {/* Volume / Speed panels ... (Kept standard logic) */}
+              {/* Speed Panel */}
+              <AnimatePresence>
+                {panel==='speed'&&(
+                  <motion.div key="spd" initial={{opacity:0,y:-8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}} transition={{duration:0.18}} style={PS} onClick={e=>e.stopPropagation()}>
+                    <div style={PH}><Back to="settings"/>Playback Speed</div>
+                    {SPEEDS.map(r=>(
+                      <div key={r} style={RW} onClick={()=>setSpd(r)} onMouseEnter={e=>e.currentTarget.style.background=C.hover} onMouseLeave={e=>e.currentTarget.style.background='transparent'}><Dot on={r===speed}/><div style={{fontSize:15,fontWeight:500}}>{r===1?'Normal':`${r}×`}</div></div>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Volume Panel */}
+              <AnimatePresence>
+                {panel==='volume'&&(
+                  <motion.div key="vol" initial={{opacity:0,y:-8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}} transition={{duration:0.18}} style={{...PS,width:240,padding:'16px 20px'}} onClick={e=>e.stopPropagation()}>
+                    <label style={{fontSize:14,color:C.dim,display:'block',marginBottom:14}}>Volume</label>
+                    <input type="range" min="0" max="100" step="1" value={vPc} onChange={e=>setVol(parseInt(e.target.value)/100)} style={{width:'100%',WebkitAppearance:'none',appearance:'none',height:4,borderRadius:2,outline:'none',cursor:'pointer',background:`linear-gradient(to right,#fff ${vPc}%,rgba(255,255,255,0.3) ${vPc}%)`}}/>
+                    <p style={{fontSize:12,color:C.dim,marginTop:10,textAlign:'center'}}>{Math.round(vPc)}%</p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
 
