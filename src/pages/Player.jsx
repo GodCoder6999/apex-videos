@@ -1,9 +1,9 @@
 // src/pages/Player.jsx
 // ─────────────────────────────────────────────────────────────────────────────
-// INDEX SEARCH ENGINE
-// Locates specific folders in the 111477.xyz open directory index based on 
-// exact logic, dives into Season folders for TV shows, and parses the 
-// SXXEXX formatted contents to feed into the custom video player.
+// INDEX SEARCH ENGINE + DEEP SCRAPING
+// Locates specific folders in the 111477.xyz index, finds the episode file,
+// then scrapes the file's HTML page to extract the direct URL from the 
+// Download button, and plays the raw .mkv/.mp4 via the custom video player.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
@@ -105,11 +105,9 @@ const Dot = ({ on }) => (
 
 // ─── Player ───────────────────────────────────────────────────────────────────
 export default function Player() {
-  // Extract proper params from the route
   const { type = 'movie', id, season: paramSeason, episode: paramEpisode } = useParams()
   const season = paramSeason || 1
   const episode = paramEpisode || 1
-
   const navigate = useNavigate()
 
   const videoRef    = useRef(null)
@@ -118,7 +116,6 @@ export default function Player() {
   const seekRef     = useRef(null)
   const hideTimer   = useRef(null)
 
-  // Stream data
   const [byLang,    setByLang]    = useState({}) 
   const [langList,  setLangList]  = useState([]) 
   const [activeLang,setActiveLang]= useState(null)
@@ -126,7 +123,6 @@ export default function Player() {
   const [captions,  setCaptions]  = useState([])
   const [activeCap, setActiveCap] = useState(-1)
 
-  // Playback
   const [playing,     setPlaying]     = useState(false)
   const [muted,       setMuted]       = useState(false)
   const [volume,      setVolume]      = useState(0.8)
@@ -137,11 +133,9 @@ export default function Player() {
   const [speed,       setSpeed]       = useState(1)
   const [isBuffering, setIsBuffering] = useState(false)
 
-  // HLS quality levels
   const [hlsLevels,   setHlsLevels]   = useState([])
   const [activeLevel, setActiveLevel] = useState(-1)
 
-  // UI
   const [showUI,   setShowUI]   = useState(true)
   const [panel,    setPanel]    = useState(null)
   const [loadState,setLoadState]= useState('loading')
@@ -157,7 +151,7 @@ export default function Player() {
   }, [])
   useEffect(() => { resetHide(); return () => clearTimeout(hideTimer.current) }, [resetHide])
 
-  // ── Load a specific stream into the video element ─────────────────────────
+  // ── Load Stream ─────────────────────────────────────────────────────────────
   const loadStream = useCallback(async (stream) => {
     if (!stream) return
     setActiveStream(stream)
@@ -177,7 +171,6 @@ export default function Player() {
 
     if (!v) return
 
-    // Standard mp4/mkv handling
     if (!isM || !Hls || !Hls.isSupported()) {
       v.src = url
       v.play().catch(()=>{})
@@ -202,166 +195,213 @@ export default function Player() {
     })
   }, [])
 
-  // ── Boot logic: Find Index Folder & Scrape contents ───────────────────────
+  // ── Scrape Download Button for Direct Video Link ────────────────────────────
+  async function getDirectLinkFromPage(filePageUrl) {
+    try {
+      const res = await fetch(`/api/proxy?url=${encodeURIComponent(filePageUrl)}`)
+      const contentType = res.headers.get('content-type') || ''
+      
+      // If the server responded with the video file directly, cancel to save bandwidth & return URL
+      if (!contentType.includes('text/html')) {
+        if (res.body) await res.body.cancel().catch(()=>{})
+        return filePageUrl
+      }
+
+      const html = await res.text()
+      
+      // Look for the href in the Download button within the page.
+      // E.g., matching a link ending with the file extension, or having an explicit path like /d/
+      const dlRegex = /href\s*=\s*"([^"]+\.(?:mkv|mp4|ts|webm)(?:\?[^"]*)?)"/gi
+      let match
+      let bestLink = filePageUrl
+
+      while ((match = dlRegex.exec(html)) !== null) {
+        const link = match[1]
+        if (!link.includes('../')) {
+           bestLink = link
+           // Prioritize specific Alist patterns like '/d/' (direct) 
+           if (link.includes('/d/') || link.includes('download')) {
+             break
+           }
+        }
+      }
+
+      if (bestLink !== filePageUrl) {
+        if (bestLink.startsWith('http')) return bestLink
+        if (bestLink.startsWith('/')) {
+            const urlObj = new URL(filePageUrl)
+            return `${urlObj.protocol}//${urlObj.host}${bestLink}`
+        }
+        return new URL(bestLink, filePageUrl).href
+      }
+    } catch (err) {
+      console.warn('Failed to extract direct link from page button:', err)
+    }
+    return filePageUrl
+  }
+
+  // ── Boot sequence ───────────────────────────────────────────────────────────
   const boot = useCallback(async () => {
     setLoadState('loading'); setLoadStep('Fetching metadata…'); setLoadPct(10)
     setPanel(null); setByLang({}); setLangList([])
     setActiveLang(null); setActiveStream(null)
     setCaptions([]); setActiveCap(-1)
 
-    let mediaItem;
+    let mediaItem
     try {
-      const tmdbRes = await fetch(`${BASE_URL}/${type}/${id}?api_key=${API_KEY}&language=en-US`);
-      if (!tmdbRes.ok) throw new Error("TMDB Metadata Error");
-      mediaItem = await tmdbRes.json();
+      const tmdbRes = await fetch(`${BASE_URL}/${type}/${id}?api_key=${API_KEY}&language=en-US`)
+      if (!tmdbRes.ok) throw new Error("TMDB Metadata Error")
+      mediaItem = await tmdbRes.json()
       
       const epLabel = type === 'tv' ? ` (S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')})` : ''
-      setTitle((mediaItem.title || mediaItem.name || '') + epLabel);
+      setTitle((mediaItem.title || mediaItem.name || '') + epLabel)
     } catch(err) {
-      setLoadState('error'); setErrorMsg('Failed to fetch media data.'); return;
+      setLoadState('error'); setErrorMsg('Failed to fetch media data.'); return
     }
 
-    // Exact Match Function to locate the primary directory
     async function findIndexFolder(mediaItem, mediaType) {
-      const itemTitle = mediaItem.title || mediaItem.name;
-      const releaseDate = mediaItem.release_date || mediaItem.first_air_date || '';
-      const year = releaseDate.substring(0, 4);
+      const itemTitle = mediaItem.title || mediaItem.name
+      const releaseDate = mediaItem.release_date || mediaItem.first_air_date || ''
+      const year = releaseDate.substring(0, 4)
 
       const normalize = (str) => {
-        if (!str) return '';
-        return str.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-      };
+        if (!str) return ''
+        return str.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()
+      }
 
-      const searchKey = normalize(itemTitle);
-      const baseDir = mediaType === 'movie' ? 'movies' : 'tvs';
-      const baseUrl = `https://a.111477.xyz/${baseDir}/`;
+      const searchKey = normalize(itemTitle)
+      const baseDir = mediaType === 'movie' ? 'movies' : 'tvs'
+      const baseUrl = `https://a.111477.xyz/${baseDir}/`
 
-      const proxyUrlReq = `/api/proxy?url=${encodeURIComponent(baseUrl)}`;
-      const res = await fetch(proxyUrlReq);
-      const html = await res.text();
+      const proxyUrlReq = `/api/proxy?url=${encodeURIComponent(baseUrl)}`
+      const res = await fetch(proxyUrlReq)
+      const html = await res.text()
 
-      const regex = /<a href="([^"]+)">([^<]+)<\/a>/g;
-      let match;
-      let bestLink = null;
+      const regex = /<a href="([^"]+)">([^<]+)<\/a>/g
+      let match
+      let bestLink = null
 
       while ((match = regex.exec(html)) !== null) {
-        const href = match[1];
-        const text = match[2];
+        const href = match[1]
+        const text = match[2]
 
-        if (href === '../' || text === 'Name' || text === 'Size') continue;
+        if (href === '../' || text === 'Name' || text === 'Size') continue
 
-        const normText = normalize(text);
+        const normText = normalize(text)
 
         if (mediaType === 'movie') {
-          if (normText.includes(searchKey) && normText.includes(year)) { bestLink = href; break; }
-          if (normText.includes(searchKey)) { if (!bestLink) bestLink = href; }
+          if (normText.includes(searchKey) && normText.includes(year)) { bestLink = href; break }
+          if (normText.includes(searchKey)) { if (!bestLink) bestLink = href }
         } else {
-          if (normText === searchKey) { bestLink = href; break; }
-          if (normText.includes(searchKey)) { if (!bestLink) bestLink = href; }
+          if (normText === searchKey) { bestLink = href; break }
+          if (normText.includes(searchKey)) { if (!bestLink) bestLink = href }
         }
       }
 
-      let finalUrl = '';
+      let finalUrl = ''
       if (bestLink) {
-        finalUrl = bestLink.startsWith('http') ? bestLink : baseUrl + bestLink;
+        finalUrl = bestLink.startsWith('http') ? bestLink : baseUrl + bestLink
       } else {
-        if (mediaType === 'tv') finalUrl = baseUrl + encodeURIComponent(itemTitle) + '/';
-        else finalUrl = baseUrl + encodeURIComponent(itemTitle + " (" + year + ")") + '/';
+        if (mediaType === 'tv') finalUrl = baseUrl + encodeURIComponent(itemTitle) + '/'
+        else finalUrl = baseUrl + encodeURIComponent(itemTitle + " (" + year + ")") + '/'
       }
 
-      if (!finalUrl.endsWith('/')) finalUrl += '/';
-      return finalUrl;
+      if (!finalUrl.endsWith('/')) finalUrl += '/'
+      return finalUrl
     }
 
     setLoadStep('Locating index directory…'); setLoadPct(30)
-    let directoryUrl;
+    let directoryUrl
     try {
-      directoryUrl = await findIndexFolder(mediaItem, type);
+      directoryUrl = await findIndexFolder(mediaItem, type)
     } catch(err) {
-      setLoadState('error'); setErrorMsg('Failed to search index directory.'); return;
+      setLoadState('error'); setErrorMsg('Failed to search index directory.'); return
     }
 
-    setLoadStep('Scraping folder for media files…'); setLoadPct(60)
-    let allStreams = [];
+    setLoadStep('Scraping folder for media files…'); setLoadPct(50)
+    let allStreams = []
 
-    // Folder and File Parser
     try {
-      const dirRes = await fetch(`/api/proxy?url=${encodeURIComponent(directoryUrl)}`);
-      const dirHtml = await dirRes.text();
+      const dirRes = await fetch(`/api/proxy?url=${encodeURIComponent(directoryUrl)}`)
+      const dirHtml = await dirRes.text()
 
-      const fileRegex = /<a href="([^"]+)">([^<]+)<\/a>/g;
-      let fileMatch;
-      let folderLinks = [];
-      let rootFiles = [];
+      const fileRegex = /<a href="([^"]+)">([^<]+)<\/a>/g
+      let fileMatch
+      let folderLinks = []
+      let rootFiles = []
 
       while ((fileMatch = fileRegex.exec(dirHtml)) !== null) {
-        const fHref = fileMatch[1];
-        const fText = fileMatch[2];
-        if (fHref === '../' || fText === 'Name' || fText === 'Size') continue;
+        const fHref = fileMatch[1]
+        const fText = fileMatch[2]
+        if (fHref === '../' || fText === 'Name' || fText === 'Size') continue
 
-        if (fHref.endsWith('.mp4') || fHref.endsWith('.mkv') || fHref.endsWith('.webm')) {
-          rootFiles.push({ href: fHref, text: fText });
+        if (fHref.endsWith('.mp4') || fHref.endsWith('.mkv') || fHref.endsWith('.ts') || fHref.endsWith('.webm')) {
+          rootFiles.push({ href: fHref, text: fText })
         } else if (fHref.endsWith('/')) {
-          folderLinks.push({ href: fHref, text: fText });
+          folderLinks.push({ href: fHref, text: fText })
         }
       }
 
       if (type === 'tv') {
-        // TV Shows: Prioritize finding the "Season X" folder
-        const sPattern = new RegExp(`^season\\s*0?${season}\\/?$|^s0?${season}\\/?$`, 'i');
-        let targetFolder = folderLinks.find(f => sPattern.test(f.text.trim()));
+        const sPattern = new RegExp(`^season\\s*0?${season}\\/?$|^s0?${season}\\/?$`, 'i')
+        let targetFolder = folderLinks.find(f => sPattern.test(f.text.trim()))
 
-        let targetHtml = dirHtml;
-        let targetUrl = directoryUrl;
+        let targetHtml = dirHtml
+        let targetUrl = directoryUrl
 
-        // If Season folder exists, dive into it
         if (targetFolder) {
-          targetUrl = directoryUrl + targetFolder.href;
-          const sfRes = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
-          targetHtml = await sfRes.text();
+          targetUrl = directoryUrl + targetFolder.href
+          const sfRes = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`)
+          targetHtml = await sfRes.text()
         }
 
-        // Parse targetHtml (either Season folder or root folder) for episode files
-        const epRegex = /<a href="([^"]+)">([^<]+)<\/a>/g;
-        let epMatch;
-        // Matches typical naming conventions: S01E01, s1e1, 1x01, 01x01
-        const ePattern = new RegExp(`[sS]0?${season}[eE]0?${episode}\\b|\\b0?${season}x0?${episode}\\b`, 'i');
+        const epRegex = /<a href="([^"]+)">([^<]+)<\/a>/g
+        let epMatch
+        const ePattern = new RegExp(`[sS]0?${season}[eE]0?${episode}\\b|\\b0?${season}x0?${episode}\\b`, 'i')
 
         while ((epMatch = epRegex.exec(targetHtml)) !== null) {
-          const epHref = epMatch[1];
-          const epText = epMatch[2];
+          const epHref = epMatch[1]
+          const epText = epMatch[2]
           
-          if (epHref.endsWith('.mp4') || epHref.endsWith('.mkv') || epHref.endsWith('.webm')) {
+          if (epHref.endsWith('.mp4') || epHref.endsWith('.mkv') || epHref.endsWith('.ts') || epHref.endsWith('.webm')) {
              if (ePattern.test(epText)) {
-                const fileUrl = epHref.startsWith('http') ? epHref : targetUrl + epHref;
+                const filePageUrl = epHref.startsWith('http') ? epHref : targetUrl + epHref
+                
+                setLoadStep(`Extracting direct download link for ${epText}…`); setLoadPct(70)
+                const directUrl = await getDirectLinkFromPage(filePageUrl)
+                
                 allStreams.push({
-                  url: fileUrl, title: epText, quality: detectQuality(epText) || 'HD',
+                  url: directUrl, title: epText, quality: detectQuality(epText) || 'HD',
                   langInfo: detectLang(epText) || { lang: 'English', code: 'en', flag: '🇺🇸' },
                   isHls: false, sourceLabel: 'Index Search'
-                });
+                })
              }
           }
         }
       } else {
-        // Movies: Parse directly from root
-        for (const file of rootFiles) {
-           const fileUrl = file.href.startsWith('http') ? file.href : directoryUrl + file.href;
+        for (let i = 0; i < rootFiles.length; i++) {
+           const file = rootFiles[i]
+           const filePageUrl = file.href.startsWith('http') ? file.href : directoryUrl + file.href
+           
+           setLoadStep(`Extracting direct download link (${i+1}/${rootFiles.length})…`); setLoadPct(70)
+           const directUrl = await getDirectLinkFromPage(filePageUrl)
+
            allStreams.push({
-              url: fileUrl, title: file.text, quality: detectQuality(file.text) || 'HD',
+              url: directUrl, title: file.text, quality: detectQuality(file.text) || 'HD',
               langInfo: detectLang(file.text) || { lang: 'English', code: 'en', flag: '🇺🇸' },
               isHls: false, sourceLabel: 'Index Search'
-           });
+           })
         }
       }
     } catch (err) {
-      console.error("Index Folder Scrape Error:", err);
+      console.error("Index Folder Scrape Error:", err)
     }
 
     if (!allStreams.length) {
-      setLoadState('error'); setErrorMsg(`No playable streams found for Season ${season} Episode ${episode}.`); return;
+      setLoadState('error'); setErrorMsg(`No playable streams found for Season ${season} Episode ${episode}.`); return
     }
 
-    // Grouping by language for audio-switching
+    // Sort by Quality and Language
     const byLangObj = {}
     for (const s of allStreams) {
       const key = s.langInfo?.code || 'en'
@@ -384,7 +424,7 @@ export default function Player() {
     const defaultLang = langs.find(l => l.code === 'en') || langs[0]
     setActiveLang(defaultLang)
     
-    setLoadStep(`Loading ${defaultLang.lang}…`); setLoadPct(100)
+    setLoadStep(`Loading stream…`); setLoadPct(100)
     setLoadState('playing')
     await loadStream(defaultLang.streams[0])
 
