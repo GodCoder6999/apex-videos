@@ -1,19 +1,11 @@
 // src/pages/Player.jsx
-// ─────────────────────────────────────────────────────────────────────────────
-// NATIVE PLAYER STRATEGY
-// ──────────────────────────────────────────────────────────────────────────────
-// This version strictly uses direct streams (.m3u8 / .mp4) played natively 
-// within the custom HTML5 video element using hls.js. 
-// Iframe embed providers have been entirely removed.
-// ─────────────────────────────────────────────────────────────────────────────
-
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { RefreshCw, AlertCircle } from 'lucide-react'
 
-const BASE_URL   = 'https://api.themoviedb.org/3'
-const API_KEY    = import.meta.env.VITE_TMDB_API_KEY
+const BASE_URL = 'https://api.themoviedb.org/3'
+const API_KEY  = import.meta.env.VITE_TMDB_API_KEY
 
 // ── Load hls.js from CDN ──────────────────────────────────────────────────────
 let _hlsProm = null
@@ -39,129 +31,6 @@ const fmt = s => {
 }
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
-
-// ── Stremio-based direct sources (for direct HLS/MP4 only) ─────────────────
-const getStremioSources = async (type, id, season, episode) => {
-  let streamId = type === 'tv' ? `tmdb:${id}:${season}:${episode}` : `tmdb:${id}`
-
-  try {
-    const extRes = await fetch(`${BASE_URL}/${type}/${id}/external_ids?api_key=${API_KEY}`)
-    if (extRes.ok) {
-      const extData = await extRes.json()
-      if (extData.imdb_id) {
-        streamId = type === 'tv'
-          ? `${extData.imdb_id}:${season}:${episode}`
-          : extData.imdb_id
-      }
-    }
-  } catch (_) {}
-
-  const stremioType = type === 'tv' ? 'series' : 'movie'
-
-  const ADDONS = [
-    'https://stremify.hayd.uk',
-    'https://nuviostreams.hayd.uk',
-  ]
-
-  const scoreStream = (s) => {
-    let score = 0
-    const url = (s.url || '').toLowerCase()
-    const t   = (s.title || s.name || '').toLowerCase()
-
-    const isM3u8 = url.includes('.m3u8')
-    const isMp4  = url.includes('.mp4')
-    const isMkv  = url.includes('.mkv') || url.includes('.avi') || url.includes('.ts') && !url.includes('.m3u8')
-
-    if (isMkv) return -99999   
-    if (isM3u8) score += 300   
-    else if (isMp4) score += 50
-
-    if (t.includes('hevc') || t.includes('x265') || t.includes('h265') || t.includes('x264.hevc')) {
-      score -= 500
-    }
-
-    const isMultiAudio = t.includes('multi') || t.includes('multi audio') || t.includes('dual') || t.includes('dual audio')
-    if (isMultiAudio && isM3u8) score += 800  
-
-    if (t.includes('hindi') || t.includes('hin')) score += 200
-    if (t.includes('english') || t.includes('eng')) score += 150
-    if (t.includes('tamil') || t.includes('tam')) score += 100
-    if (t.includes('telugu') || t.includes('tel')) score += 100
-    if (t.includes('malayalam') || t.includes('mal')) score += 80
-    if (t.includes('kannada') || t.includes('kan')) score += 80
-
-    if (t.includes('2160p') || t.includes('4k')) score += 60
-    if (t.includes('1080p')) score += 40
-    if (t.includes('720p')) score += 20
-
-    if (t.includes('web-dl') || t.includes('webdl')) score += 50
-    if (t.includes('webrip') || t.includes('web rip')) score += 30
-    if (t.includes('amzn') || t.includes('nf') || t.includes('disney')) score += 40
-
-    const hasPrefLang = isMultiAudio ||
-      t.includes('hindi') || t.includes('english') ||
-      t.includes('tamil') || t.includes('telugu') ||
-      t.includes('malayalam') || t.includes('kannada') ||
-      t.includes('hin') || t.includes('eng') || t.includes('tam') ||
-      t.includes('tel') || t.includes('mal') || t.includes('kan')
-
-    if (!hasPrefLang) {
-      if (t.includes('ita') || t.includes('fre') || t.includes('esp') ||
-          t.includes('rus') || t.includes('ger') || t.includes('por')) {
-        score -= 800
-      }
-    }
-
-    return score
-  }
-
-  const allStreams = []
-
-  for (const base of ADDONS) {
-    try {
-      const targetUrl = `${base}/stream/${stremioType}/${streamId}.json`
-      const proxyUrl  = `/api/proxy?url=${encodeURIComponent(targetUrl)}`
-      const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) })
-      if (!resp.ok) continue
-      const text = await resp.text()
-      if (text.trimStart().startsWith('<')) continue
-      const data = JSON.parse(text)
-      if (data?.streams?.length) {
-        allStreams.push(...data.streams.filter(s => s.url))
-      }
-    } catch (_) {}
-  }
-
-  const seen = new Set()
-  const validStreams = allStreams.filter(s => {
-    if (!s.url || seen.has(s.url)) return false
-    seen.add(s.url)
-    const url = s.url.toLowerCase()
-    if (url.includes('.mkv') || url.includes('.avi')) return false
-    if (!url.startsWith('http')) return false
-    return true
-  })
-
-  validStreams.sort((a, b) => scoreStream(b) - scoreStream(a))
-
-  return validStreams.map((s, i) => {
-    const t = (s.title || s.name || '').split('\n')
-    const label = t[0]?.substring(0, 50) || `Stream ${i + 1}`
-    const size  = t.find(p => p.includes('GB') || p.includes('MB')) || ''
-    const url   = s.url.toLowerCase()
-    const isM3u8 = url.includes('.m3u8')
-    const score  = scoreStream(s)
-    const isMulti = label.toLowerCase().includes('multi') || label.toLowerCase().includes('dual')
-    const emoji = isM3u8 && isMulti ? '🎵' : isM3u8 ? '📡' : '🎬'
-    return {
-      name: `${emoji} ${label}${size ? ` • ${size.trim()}` : ''}`,
-      url: s.url,
-      type: 'direct',
-      priority: 10 + i,
-      score,
-    }
-  })
-}
 
 // ── SVG Icons ─────────────────────────────────────────────────────────────────
 const IconClose = () => (
@@ -282,7 +151,7 @@ export default function Player() {
   const [speed,         setSpeed]         = useState(1)
   const [isBuffering,   setIsBuffering]   = useState(false)
 
-  // Sources
+  // Sources & Track lists
   const [sources,       setSources]       = useState([])
   const [activeSource,  setActiveSource]  = useState(0)
   const [audioTracks,   setAudioTracks]   = useState([])
@@ -297,10 +166,10 @@ export default function Player() {
   const [openPanel,     setOpenPanel]     = useState(null)
   const [loadState,     setLoadState]     = useState('loading')
   const [errorMsg,      setErrorMsg]      = useState('')
-  const [loadStep,      setLoadStep]      = useState('Connecting...')
+  const [loadStep,      setLoadStep]      = useState('Connecting to servers...')
   const [loadProgress,  setLoadProgress]  = useState(0)
 
-  // Title / episode info
+  // Title info
   const [title,         setTitle]         = useState('')
   const [season]  = useState(1)
   const [episode] = useState(1)
@@ -326,34 +195,97 @@ export default function Player() {
     return () => clearTimeout(hideTimer.current)
   }, [resetHide])
 
-  // ── 1. Fetch direct stream sources ──────────────────────────────
+  // ── 1. Fetch & Rank All Available Sources ─────────────────────────────────
   const fetchSources = useCallback(async () => {
     setLoadState('loading')
-    setLoadProgress(30)
-    setLoadStep('Finding direct streams...')
-    setOpenPanel(null)
-
-    let directSources = []
+    setLoadProgress(20)
+    setLoadStep('Scanning stream providers...')
+    
+    let streamId = type === 'tv' ? `tmdb:${id}:${season}:${episode}` : `tmdb:${id}`
     try {
-      directSources = await Promise.race([
-        getStremioSources(type, id, season, episode),
-        new Promise(resolve => setTimeout(() => resolve([]), 12000)) // 12s timeout
-      ])
+      const extRes = await fetch(`${BASE_URL}/${type}/${id}/external_ids?api_key=${API_KEY}`)
+      if (extRes.ok) {
+        const extData = await extRes.json()
+        if (extData.imdb_id) {
+          streamId = type === 'tv' ? `${extData.imdb_id}:${season}:${episode}` : extData.imdb_id
+        }
+      }
     } catch (_) {}
 
-    if (directSources.length === 0) {
+    const stremioType = type === 'tv' ? 'series' : 'movie'
+    const ADDONS = [
+      'https://stremify.hayd.uk',
+      'https://webstreamr.hayd.uk',
+      'https://nuviostreams.hayd.uk',
+      'https://nodebrid.fly.dev'
+    ]
+
+    let json = null
+    for (const base of ADDONS) {
+      try {
+        setLoadStep(`Searching ${new URL(base).hostname}...`)
+        const targetUrl = `${base}/stream/${stremioType}/${streamId}.json`
+        const proxyUrl  = `/api/proxy?url=${encodeURIComponent(targetUrl)}`
+        
+        const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) })
+        if (!resp.ok) continue 
+        const text = await resp.text()
+        if (text.trimStart().startsWith('<')) continue 
+        const data = JSON.parse(text)
+        
+        if (data?.streams?.length > 0) {
+          json = data
+          break 
+        }
+      } catch (err) { }
+    }
+
+    if (!json?.streams?.length) {
       setLoadState('error')
-      setErrorMsg('No direct native streams found for this title.')
-      setLoadProgress(100)
+      setErrorMsg('All free stream providers are currently unavailable. Please try again later.')
       return
     }
 
-    setLoadProgress(90)
-    setLoadStep('Ready!')
+    setLoadStep('Prioritizing Multi-Language streams...')
+    setLoadProgress(60)
 
-    setSources(directSources)
+    // SMART SCORING: Find English, Hindi, and Multi-Audio
+    const getScore = (s) => {
+      let score = 0
+      const url = (s.url || '').toLowerCase()
+      const t = (s.title || '').toLowerCase()
+
+      // Format preference
+      if (url.includes('.m3u8')) score += 50
+      else if (url.includes('.mp4')) score += 30
+
+      // HEVC/x265 penalization (Keep them in the list, but don't auto-play them because browsers struggle)
+      if (t.includes('hevc') || t.includes('x265') || t.includes('h265')) score -= 200
+
+      // Language Preference (Huge boost for Multi, Dual, English, Hindi)
+      if (t.includes('multi') || t.includes('multi-audio') || t.includes('dual')) score += 500
+      if (t.includes('hin') || t.includes('hindi')) score += 300
+      if (t.includes('eng') || t.includes('english')) score += 200
+      if (t.includes('amzn') || t.includes('web-dl') || t.includes('nf')) score += 100
+
+      // Quality preference
+      if (t.includes('1080p')) score += 40
+      if (t.includes('720p')) score += 20
+
+      // Aggressively penalize isolated foreign dubs
+      const hasEngOrMulti = t.includes('eng') || t.includes('multi') || t.includes('dual') || t.includes('hin')
+      if (!hasEngOrMulti) {
+          if (t.includes('ita') || t.includes('fre') || t.includes('esp') || t.includes('rus')) score -= 1000
+      }
+
+      return score
+    }
+
+    const validStreams = json.streams.filter(s => s.url)
+    validStreams.sort((a, b) => getScore(b) - getScore(a))
+
+    setSources(validStreams)
     setActiveSource(0)
-    setLoadProgress(100)
   }, [type, id, season, episode])
 
   useEffect(() => {
@@ -361,56 +293,65 @@ export default function Player() {
   }, [fetchSources])
 
 
-  // ── 2. Load selected source into native player ────────────────────────────
-  const loadSource = useCallback(async (source) => {
-    if (!source) return
-
-    // Clean up previous player
-    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
-    const video = videoRef.current
-    if (video) { video.pause(); video.removeAttribute('src'); video.load() }
-
+  // ── 2. Load Selected Stream into Player ───────────────────────────────────
+  const loadVideo = useCallback(async (stream) => {
+    if (!stream) return
+    setLoadState('loading')
+    setLoadStep('Initializing Video Engine...')
+    setLoadProgress(90)
+    
     setAudioTracks([])
     setActiveAudio(-1)
     setQualities([])
     setActiveQuality(-1)
     setSubTracks([])
     setActiveSub(-1)
-    setPlaying(false)
 
-    setLoadState('loading')
-    setLoadStep('Initializing Video Engine...')
-    setLoadProgress(90)
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
+    const video = videoRef.current
+    if (video) {
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
+    }
 
     try {
       const Hls = await loadHls()
       if (!video) return
 
-      const isM3U8 = /\.m3u8/i.test(source.url)
-      const streamUrl = isM3U8 ? `/api/proxy?url=${encodeURIComponent(source.url)}` : source.url
+      // Only proxy m3u8. Direct mp4/mkv bypasses to prevent memory crash
+      const isM3U8 = /\.m3u8/i.test(stream.url) || stream.url.includes('.m3u8')
+      const m3u8Url = isM3U8 ? `/api/proxy?url=${encodeURIComponent(stream.url)}` : stream.url
 
+      // Native fallback
       if (!isM3U8 || !Hls || !Hls.isSupported()) {
-        video.src = streamUrl
+        video.src = m3u8Url
         setLoadState('playing')
         setLoadProgress(100)
-        video.play().catch(e => { if (e.name !== 'AbortError') setPlaying(false) })
+        video.play().catch((err) => {
+          if (err.name !== 'AbortError') {
+             setLoadState('error')
+             setErrorMsg('Browser rejected this video format. Please open Settings > Sources and select a different stream.')
+          }
+        })
         return
       }
 
+      // HLS.js Path
       const hls = new Hls({
         enableWorker: true, lowLatencyMode: false, backBufferLength: 90,
-        maxBufferLength: 60, maxMaxBufferLength: 600, startLevel: -1,
+        maxBufferLength: 60, maxMaxBufferLength: 600, startLevel: -1,       
         manifestLoadingMaxRetry: 4, levelLoadingMaxRetry: 4, fragLoadingMaxRetry: 6,
+        xhrSetup: xhr => { xhr.withCredentials = false },
       })
+
       hlsRef.current = hls
       hls.attachMedia(video)
 
-      hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(streamUrl))
+      hls.on(Hls.Events.MEDIA_ATTACHED, () => { hls.loadSource(m3u8Url) })
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
-        const qs = [{ id: -1, label: 'Auto' }, ...data.levels.map((l, i) => ({
-          id: i, label: l.height ? `${l.height}p` : `Level ${i+1}`, bitrate: l.bitrate
-        }))]
+        const qs = [ { id: -1, label: 'Auto' }, ...data.levels.map((l, i) => ({ id: i, label: l.height ? `${l.height}p` : `Level ${i+1}`, bitrate: l.bitrate })) ]
         setQualities(qs); setActiveQuality(-1)
 
         const at = hls.audioTracks || []
@@ -422,12 +363,12 @@ export default function Player() {
         }
 
         const st = hls.subtitleTracks || []
-        setSubTracks([{ id: -1, label: 'Off' }, ...st.map((t, i) => ({ id: i, label: t.name || t.lang || `Sub ${i+1}` }))])
+        setSubTracks([ { id: -1, label: 'Off' }, ...st.map((t, i) => ({ id: i, label: t.name || t.lang || `Sub ${i+1}` })) ])
         setActiveSub(-1); hls.subtitleDisplay = false
 
         setLoadState('playing')
         setLoadProgress(100)
-        video.play().catch(e => { if (e.name !== 'AbortError') setPlaying(false) })
+        video.play().catch(e => { if(e.name!=='AbortError') setPlaying(false) })
       })
 
       hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_, d) => {
@@ -438,35 +379,39 @@ export default function Player() {
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (!d.fatal) return
         if (d.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad()
-        else { setLoadState('error'); setErrorMsg('Fatal stream error. Try a different source.') }
+        else { setLoadState('error'); setErrorMsg('A fatal stream error occurred. Try a different source.') }
       })
+
     } catch (e) {
       setLoadState('error')
       setErrorMsg(e.message)
     }
   }, [])
 
+  // Trigger video load when sources or activeSource changes
   useEffect(() => {
     if (sources.length > 0 && sources[activeSource]) {
-      loadSource(sources[activeSource])
+      loadVideo(sources[activeSource])
     }
-  }, [sources, activeSource, loadSource])
+  }, [sources, activeSource, loadVideo])
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => { if (hlsRef.current) hlsRef.current.destroy() }
   }, [])
 
-  // ── Video event listeners ──────────────────────────────
+
+  // ── Video event listeners ──────────────────────────────────────────────────
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
-    const onPlay        = () => setPlaying(true)
-    const onPause       = () => setPlaying(false)
-    const onTimeUpdate  = () => {
+    const onPlay      = () => setPlaying(true)
+    const onPause     = () => setPlaying(false)
+    const onTimeUpdate = () => {
       setCurrent(v.currentTime)
       if (v.buffered.length) setBuffered(v.buffered.end(v.buffered.length - 1))
     }
-    const onLoadedMeta  = () => {
+    const onLoadedMeta = () => {
       setDuration(v.duration); v.volume = volume
       if (!hlsRef.current && v.audioTracks?.length > 0) {
         setAudioTracks(Array.from(v.audioTracks).map((t, i) => ({ id: i, label: t.label || t.language || `Track ${i+1}`, lang: t.language || '' })))
@@ -477,36 +422,37 @@ export default function Player() {
     const onDurationChange = () => setDuration(v.duration)
     const onVolumeChange   = () => { setVolume(v.volume); setMuted(v.muted) }
     const onWaiting        = () => setIsBuffering(true)
-    const onPlayingE       = () => setIsBuffering(false)
+    const onPlaying        = () => setIsBuffering(false)
     const onCanPlay        = () => setIsBuffering(false)
     const onError          = () => {
-      if (v.error?.code === 4) {
-        setLoadState('error')
-        setErrorMsg('Format unsupported by browser. Please try a different source.')
+      if(v.error && v.error.code === 4) {
+         setLoadState('error')
+         setErrorMsg('Format unsupported. Please open Settings > Sources and select a different stream.')
       }
     }
-    v.addEventListener('play', onPlay);               v.addEventListener('pause', onPause)
-    v.addEventListener('timeupdate', onTimeUpdate);   v.addEventListener('loadedmetadata', onLoadedMeta)
-    v.addEventListener('durationchange', onDurationChange); v.addEventListener('volumechange', onVolumeChange)
-    v.addEventListener('waiting', onWaiting);         v.addEventListener('playing', onPlayingE)
-    v.addEventListener('canplay', onCanPlay);         v.addEventListener('error', onError)
-    return () => {
-      v.removeEventListener('play', onPlay);               v.removeEventListener('pause', onPause)
-      v.removeEventListener('timeupdate', onTimeUpdate);   v.removeEventListener('loadedmetadata', onLoadedMeta)
-      v.removeEventListener('durationchange', onDurationChange); v.removeEventListener('volumechange', onVolumeChange)
-      v.removeEventListener('waiting', onWaiting);         v.removeEventListener('playing', onPlayingE)
-      v.removeEventListener('canplay', onCanPlay);         v.removeEventListener('error', onError)
-    }
-  }, [volume])
 
-  // Fullscreen
+    v.addEventListener('play', onPlay); v.addEventListener('pause', onPause)
+    v.addEventListener('timeupdate', onTimeUpdate); v.addEventListener('loadedmetadata', onLoadedMeta)
+    v.addEventListener('durationchange', onDurationChange); v.addEventListener('volumechange', onVolumeChange)
+    v.addEventListener('waiting', onWaiting); v.addEventListener('playing', onPlaying)
+    v.addEventListener('canplay', onCanPlay); v.addEventListener('error', onError)
+
+    return () => {
+      v.removeEventListener('play', onPlay); v.removeEventListener('pause', onPause)
+      v.removeEventListener('timeupdate', onTimeUpdate); v.removeEventListener('loadedmetadata', onLoadedMeta)
+      v.removeEventListener('durationchange', onDurationChange); v.removeEventListener('volumechange', onVolumeChange)
+      v.removeEventListener('waiting', onWaiting); v.removeEventListener('playing', onPlaying)
+      v.removeEventListener('canplay', onCanPlay); v.removeEventListener('error', onError)
+    }
+  }, [volume]) // eslint-disable-line
+
+  // Fullscreen & Keyboard
   useEffect(() => {
     const fn = () => setFullscreen(!!document.fullscreenElement)
     document.addEventListener('fullscreenchange', fn)
     return () => document.removeEventListener('fullscreenchange', fn)
   }, [])
 
-  // Keyboard shortcuts 
   useEffect(() => {
     const onKey = e => {
       if (['INPUT','TEXTAREA'].includes(e.target.tagName)) return
@@ -525,10 +471,7 @@ export default function Player() {
   }, [duration, resetHide])
 
   // ── Controls ───────────────────────────────────────────────────────────────
-  const togglePlay = () => {
-    const v = videoRef.current; if (!v) return
-    v.paused ? v.play() : v.pause(); resetHide()
-  }
+  const togglePlay = () => { const v = videoRef.current; if (!v) return; v.paused ? v.play() : v.pause(); resetHide() }
   const setVol = val => {
     const v = videoRef.current; if (!v) return
     const n = Math.max(0, Math.min(1, val)); v.volume = n
@@ -545,71 +488,59 @@ export default function Player() {
     if (videoRef.current) videoRef.current.currentTime = pct * duration
     resetHide()
   }
-  const switchAudio = aId => {
+
+  const switchAudio = id => {
     const hls = hlsRef.current; const v = videoRef.current
-    if (hls) { hls.audioTrack = aId; setActiveAudio(aId) }
-    else if (v?.audioTracks) { for (let i = 0; i < v.audioTracks.length; i++) v.audioTracks[i].enabled = (i === aId); setActiveAudio(aId) }
+    if (hls) { hls.audioTrack = id; setActiveAudio(id) } 
+    else if (v?.audioTracks) { for (let i = 0; i < v.audioTracks.length; i++) v.audioTracks[i].enabled = (i === id); setActiveAudio(id) }
   }
-  const switchQuality = qId => {
-    const hls = hlsRef.current; if (!hls) return
-    hls.currentLevel = qId; hls.autoLevelEnabled = qId === -1; setActiveQuality(qId)
-  }
-  const switchSub = sId => {
-    const hls = hlsRef.current; if (!hls) return
-    if (sId === -1) { hls.subtitleDisplay = false; hls.subtitleTrack = -1 }
-    else { hls.subtitleTrack = sId; hls.subtitleDisplay = true }
-    setActiveSub(sId)
-  }
+  const switchQuality = id => { const hls = hlsRef.current; if (!hls) return; hls.currentLevel = id; hls.autoLevelEnabled = id === -1; setActiveQuality(id) }
+  const switchSub = id => { const hls = hlsRef.current; if (!hls) return; if (id === -1) { hls.subtitleDisplay = false; hls.subtitleTrack = -1 } else { hls.subtitleTrack = id; hls.subtitleDisplay = true }; setActiveSub(id) }
   const setSpeedFn = r => { if (videoRef.current) videoRef.current.playbackRate = r; setSpeed(r) }
 
   const pctPlayed   = duration ? (current  / duration) * 100 : 0
   const pctBuffered = duration ? (buffered / duration) * 100 : 0
   const volPct      = muted ? 0 : volume * 100
 
-  // ── UI Styles ──────────────────────────────────────────────────────────────
+  // ── UI Styles & Helpers ───────────────────────────────────────────────────
   const C = { bg: '#000', panelBg: '#1a1d21', panelBorder: '#2e3239', accent: '#1a98ff', textSec: '#8b8f97', hover: 'rgba(255,255,255,0.08)', active: 'rgba(255,255,255,0.12)' }
   const RadioCircle = ({ selected }) => (
     <div style={{ width:24, height:24, minWidth:24, border: `2px solid ${selected ? C.accent : C.textSec}`, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: selected ? C.accent : 'transparent', flexShrink: 0 }}>
       {selected && <div style={{width:8,height:8,background:'#fff',borderRadius:'50%'}}/>}
     </div>
   )
-  const panelStyle = { position:'absolute', top:56, right:16, width:340, background:C.panelBg, borderRadius:8, overflow:'hidden', zIndex:100, boxShadow:'0 8px 32px rgba(0,0,0,0.8)' }
+  const panelStyle = { position:'absolute', top:56, right:16, width:320, background:C.panelBg, borderRadius:8, overflow:'hidden', zIndex:100, boxShadow:'0 8px 32px rgba(0,0,0,0.8)' }
   const panelHeaderStyle = { display:'flex', alignItems:'center', padding:'16px 20px', borderBottom:`1px solid ${C.panelBorder}`, fontSize:16, fontWeight:600, gap:12 }
   const settingsRowStyle = { display:'flex', alignItems:'center', padding:'16px 20px', cursor:'pointer', borderBottom:`1px solid ${C.panelBorder}`, gap:16 }
   const rowLabelStyle = { flex:1, fontSize:15, fontWeight:500 }
   const rowValueStyle = { fontSize:14, color:C.textSec, display:'flex', alignItems:'center', gap:4 }
   const radioOptionStyle = { display:'flex', alignItems:'flex-start', padding:'14px 20px', cursor:'pointer', borderBottom:`1px solid ${C.panelBorder}`, gap:14 }
 
+  const getStreamLabel = (s) => {
+    const parts = (s.title || s.name || 'Unknown Stream').split('\n')
+    const name = parts[0].substring(0, 45) + (parts[0].length > 45 ? '...' : '')
+    const size = parts.find(p => p.includes('GB') || p.includes('MB')) || ''
+    return { name, size: size.trim() }
+  }
+
   const audioLabel   = audioTracks.find(t => t.id === activeAudio)?.label  || 'Auto'
   const qualityLabel = qualities.find(q => q.id === activeQuality)?.label  || 'Auto'
   const subLabel     = subTracks.find(s => s.id === activeSub)?.label      || 'Off'
   const speedLabel   = speed === 1 ? 'Normal' : `${speed}×`
 
-  const currentSrc = sources[activeSource]
-
   return (
-    <div
-      ref={containerRef}
-      onMouseMove={resetHide}
-      onTouchStart={resetHide}
-      onClick={() => { if (loadState === 'playing') { togglePlay(); resetHide() } }}
-      style={{ position:'fixed', inset:0, background:'#000', zIndex:100, display:'flex', flexDirection:'column', userSelect:'none', fontFamily:"'Amazon Ember','Arial',sans-serif" }}
-    >
-      <video
-        ref={videoRef}
-        style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'contain', display:'block' }}
-        playsInline
-        autoPlay
-      />
+    <div ref={containerRef} onMouseMove={resetHide} onTouchStart={resetHide} onClick={() => { if (loadState === 'playing') { togglePlay(); resetHide() } }} style={{ position:'fixed', inset:0, background:'#000', zIndex:100, display:'flex', flexDirection:'column', userSelect:'none', fontFamily:"'Amazon Ember','Arial',sans-serif" }}>
+      {/* ── VIDEO ── */}
+      <video ref={videoRef} style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'contain' }} playsInline autoPlay />
 
       {/* ── LOADING OVERLAY ── */}
       <AnimatePresence>
         {loadState === 'loading' && (
-          <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} style={{ position:'absolute', inset:0, zIndex:20, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:28, background:'#0a0d12', textAlign:'center', padding:'0 24px' }}>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ position:'absolute', inset:0, zIndex:20, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:28, background:'#0a0d12', textAlign:'center', padding:'0 24px' }}>
             <div style={{position:'relative', width:72, height:72}}>
               <div style={{position:'absolute',inset:0,borderRadius:'50%',border:'3px solid rgba(255,255,255,0.05)'}}/>
-              <motion.div animate={{ rotate: 360 }} transition={{ duration:0.9, repeat:Infinity, ease:'linear' }} style={{position:'absolute',inset:0,borderRadius:'50%',border:'3px solid transparent',borderTopColor:'#1a98ff'}}/>
-              <motion.div animate={{ rotate: -360 }} transition={{ duration:1.5, repeat:Infinity, ease:'linear' }} style={{position:'absolute',inset:8,borderRadius:'50%',border:'2px solid transparent',borderTopColor:'rgba(255,255,255,0.15)'}}/>
+              <motion.div animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease:'linear' }} style={{position:'absolute',inset:0,borderRadius:'50%',border:'3px solid transparent',borderTopColor:'#1a98ff'}}/>
+              <motion.div animate={{ rotate: -360 }} transition={{ duration: 1.5, repeat: Infinity, ease:'linear' }} style={{position:'absolute',inset:8,borderRadius:'50%',border:'2px solid transparent',borderTopColor:'rgba(255,255,255,0.15)'}}/>
             </div>
             <motion.div key={loadStep} initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-8 }}>
               <p style={{color:'#fff', fontWeight:600, fontSize:14, letterSpacing:'0.02em'}}>{loadStep}</p>
@@ -628,49 +559,38 @@ export default function Player() {
             <AlertCircle style={{width:52,height:52,color:'#ff4444'}}/>
             <div>
               <p style={{color:'#fff', fontSize:20, fontWeight:700, marginBottom:8}}>Stream Error</p>
-              <p style={{color:'#888', fontSize:14, maxWidth:400}}>{errorMsg}</p>
+              <p style={{color:'#888', fontSize:14, maxWidth:360}}>{errorMsg}</p>
             </div>
             <div style={{display:'flex', gap:12, flexWrap:'wrap', justifyContent:'center'}}>
+              {/* If sources exist, allow opening the source menu even on error! */}
               {sources.length > 0 && (
-                <button onClick={e => { e.stopPropagation(); setOpenPanel('sources'); setLoadState('playing') }} style={{ display:'flex', alignItems:'center', gap:8, background:'#1a98ff', color:'#fff', border:'none', padding:'10px 24px', borderRadius:8, fontSize:14, fontWeight:700, cursor:'pointer' }}>
-                  Try Different Source
+                <button onClick={e => { e.stopPropagation(); setOpenPanel('sources'); setLoadState('playing'); }} style={{ display:'flex', alignItems:'center', gap:8, background:'#1a98ff', color:'#fff', border:'none', padding:'10px 24px', borderRadius:8, fontSize:14, fontWeight:700, cursor:'pointer' }}>
+                  Select Different Source
                 </button>
               )}
               <button onClick={e => { e.stopPropagation(); fetchSources() }} style={{ background:'rgba(255,255,255,0.1)', color:'#fff', border:'none', padding:'10px 24px', borderRadius:8, fontSize:14, fontWeight:700, cursor:'pointer' }}>
-                <RefreshCw style={{width:16,height:16,display:'inline',marginRight:6}}/> Retry
+                <RefreshCw style={{width:16,height:16,display:'inline',marginRight:6}}/> Retry Auto
               </button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── CONTROLS OVERLAY ── */}
+      {/* ── CONTROLS UI ── */}
       {loadState !== 'error' && (
-        <motion.div
-          animate={{ opacity: showUI ? 1 : 0 }}
-          style={{ position:'absolute', inset:0, zIndex:30, pointerEvents: showUI ? 'auto' : 'none' }}
-          onClick={e => e.stopPropagation()}
-        >
-          {/* Top gradient */}
+        <motion.div animate={{ opacity: showUI ? 1 : 0 }} style={{ position:'absolute', inset:0, zIndex:30, pointerEvents: showUI ? 'auto' : 'none' }} onClick={e => e.stopPropagation()}>
           <div style={{ position:'absolute', top:0, left:0, right:0, height:160, background:'linear-gradient(to bottom, rgba(0,0,0,0.85), transparent)', pointerEvents:'none' }}/>
-          
-          {/* Bottom gradient */}
           <div style={{ position:'absolute', bottom:0, left:0, right:0, height:220, background:'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 60%, transparent 100%)', pointerEvents:'none' }}/>
 
-          {/* Top bar */}
           <div style={{ position:'absolute', top:0, left:0, right:0, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 20px', zIndex:10 }}>
             <div style={{display:'flex', alignItems:'center', gap:14}}>
               <button onClick={() => navigate(-1)} style={ICON_BTN}><IconClose/></button>
-              <div>
-                <p style={{fontSize:18, fontWeight:700, color:'#fff'}}>{title || 'Now Playing'}</p>
-              </div>
+              <p style={{fontSize:20, fontWeight:700, color:'#fff'}}>{title || 'Now Playing'}</p>
             </div>
 
             <div style={{display:'flex', alignItems:'center', gap:4, position:'relative'}}>
               <button style={ICON_BTN} onClick={() => setOpenPanel(p => p === 'subtitles' ? null : 'subtitles')}><IconCC/></button>
-              <button style={ICON_BTN} onClick={() => setOpenPanel(p => p === 'volume' ? null : 'volume')}>
-                {(muted || volume === 0) ? <IconVolumeMute/> : <IconVolume/>}
-              </button>
+              <button style={ICON_BTN} onClick={() => setOpenPanel(p => p === 'volume' ? null : 'volume')}>{(muted || volume === 0) ? <IconVolumeMute/> : <IconVolume/>}</button>
               <button style={ICON_BTN} onClick={() => { if (document.pictureInPictureEnabled && videoRef.current) videoRef.current.requestPictureInPicture() }}><IconPiP/></button>
               <button style={ICON_BTN} onClick={toggleFs}>{fullscreen ? <IconFullscreenExit/> : <IconFullscreen/>}</button>
               <button style={ICON_BTN} onClick={() => setOpenPanel(p => p === 'settings' ? null : 'settings')}><IconMore/></button>
@@ -680,62 +600,49 @@ export default function Player() {
                 {openPanel === 'settings' && (
                   <motion.div initial={{ opacity:0, y:-8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-8 }} style={panelStyle} onClick={e => e.stopPropagation()}>
                     <div style={panelHeaderStyle}>Settings</div>
+                    
+                    {/* NEW SOURCES SELECTOR */}
                     <div style={settingsRowStyle} onClick={() => setOpenPanel('sources')}>
-                      <IconServer/>
-                      <span style={rowLabelStyle}>Stream Source</span>
-                      <span style={rowValueStyle}>{currentSrc?.name?.substring(0,20) || 'Auto'} <IconChevronRight/></span>
+                      <IconServer/> <span style={rowLabelStyle}>Stream Source</span> <span style={rowValueStyle}>Server {activeSource + 1} <IconChevronRight/></span>
                     </div>
+
                     <div style={settingsRowStyle} onClick={() => setOpenPanel('audio')}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{width:20,height:20}}><rect x="2" y="6" width="4" height="12" rx="1"/><rect x="8" y="3" width="4" height="18" rx="1"/><rect x="14" y="8" width="4" height="10" rx="1"/></svg>
-                      <span style={rowLabelStyle}>Audio Language</span>
-                      <span style={rowValueStyle}>{audioLabel} <IconChevronRight/></span>
+                      <span style={rowLabelStyle}>Audio</span> <span style={rowValueStyle}>{audioLabel} <IconChevronRight/></span>
                     </div>
                     <div style={settingsRowStyle} onClick={() => setOpenPanel('subtitles')}>
-                      <IconCC/>
-                      <span style={rowLabelStyle}>Subtitles</span>
-                      <span style={rowValueStyle}>{subLabel} <IconChevronRight/></span>
+                      <IconCC/> <span style={rowLabelStyle}>Subtitles</span> <span style={rowValueStyle}>{subLabel} <IconChevronRight/></span>
                     </div>
                     <div style={settingsRowStyle} onClick={() => setOpenPanel('quality')}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{width:20,height:20}}><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="8" y1="20" x2="8" y2="22"/><line x1="16" y1="20" x2="16" y2="22"/><line x1="5" y1="22" x2="19" y2="22"/></svg>
-                      <span style={rowLabelStyle}>Video Quality</span>
-                      <span style={rowValueStyle}>{qualityLabel} <IconChevronRight/></span>
+                      <span style={rowLabelStyle}>Video Quality</span> <span style={rowValueStyle}>{qualityLabel} <IconChevronRight/></span>
                     </div>
                     <div style={{...settingsRowStyle, borderBottom:'none'}} onClick={() => setOpenPanel('speed')}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{width:20,height:20}}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                      <span style={rowLabelStyle}>Playback Speed</span>
-                      <span style={rowValueStyle}>{speedLabel} <IconChevronRight/></span>
+                      <span style={rowLabelStyle}>Playback Speed</span> <span style={rowValueStyle}>{speedLabel} <IconChevronRight/></span>
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
 
-              {/* ── SOURCES PANEL ── */}
+              {/* ── SOURCES SUB-PANEL ── */}
               <AnimatePresence>
                 {openPanel === 'sources' && (
                   <motion.div initial={{ opacity:0, y:-8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-8 }} style={panelStyle} onClick={e => e.stopPropagation()}>
-                    <div style={panelHeaderStyle}>
-                      <button style={{background:'none',border:'none',color:'#fff',cursor:'pointer'}} onClick={() => setOpenPanel('settings')}><IconChevronLeft/></button>
-                      Select Source
-                    </div>
-                    <div style={{maxHeight:400, overflowY:'auto'}}>
-                      {sources.length > 0 && (
-                        <>
-                          <div style={{padding:'10px 20px 6px', fontSize:11, fontWeight:700, color:C.textSec, letterSpacing:'0.08em', textTransform:'uppercase', borderTop:`1px solid ${C.panelBorder}`, background:'rgba(255,255,255,0.03)'}}>
-                            📡 Direct Streams
+                    <div style={panelHeaderStyle}><button style={{background:'none',border:'none',color:'#fff',cursor:'pointer'}} onClick={() => setOpenPanel('settings')}><IconChevronLeft/></button> Select Stream Source</div>
+                    <div style={{maxHeight: 320, overflowY: 'auto'}}>
+                      {sources.map((s, i) => {
+                        const { name, size } = getStreamLabel(s)
+                        return (
+                          <div key={i} style={radioOptionStyle} onClick={() => { setActiveSource(i); setOpenPanel(null); }}>
+                            <RadioCircle selected={i === activeSource}/>
+                            <div style={{overflow: 'hidden', flex: 1}}>
+                              <div style={{fontSize: 13, fontWeight: 500, whiteSpace:'nowrap', textOverflow:'ellipsis', overflow:'hidden', color: i === activeSource ? '#fff' : '#ddd'}}>{name}</div>
+                              {size && <div style={{fontSize: 11, color: '#8b8f97', marginTop: 2}}>{size}</div>}
+                            </div>
                           </div>
-                          {sources.slice(0, 20).map((s, i) => {
-                            const globalIdx = sources.indexOf(s)
-                            return (
-                              <div key={i} style={radioOptionStyle} onClick={() => { setActiveSource(globalIdx); setOpenPanel(null) }}>
-                                <RadioCircle selected={globalIdx === activeSource}/>
-                                <div style={{overflow:'hidden', flex:1}}>
-                                  <div style={{fontSize:13, fontWeight:500, whiteSpace:'nowrap', textOverflow:'ellipsis', overflow:'hidden', color: globalIdx === activeSource ? '#fff' : '#ccc'}}>{s.name}</div>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </>
-                      )}
+                        )
+                      })}
                     </div>
                   </motion.div>
                 )}
@@ -745,23 +652,13 @@ export default function Player() {
               <AnimatePresence>
                 {openPanel === 'audio' && (
                   <motion.div initial={{ opacity:0, y:-8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-8 }} style={panelStyle} onClick={e => e.stopPropagation()}>
-                    <div style={panelHeaderStyle}><button style={{background:'none',border:'none',color:'#fff',cursor:'pointer'}} onClick={() => setOpenPanel('settings')}><IconChevronLeft/></button> Audio Language</div>
-                    {audioTracks.length === 0
-                      ? (
-                        <div style={{padding:'20px'}}>
-                          <p style={{color:C.textSec, fontSize:13, textAlign:'center', marginBottom:12}}>No alternate audio tracks in this stream.</p>
-                        </div>
-                      )
-                      : audioTracks.map(t => (
-                          <div key={t.id} style={radioOptionStyle} onClick={() => switchAudio(t.id)}>
-                            <RadioCircle selected={t.id === activeAudio}/>
-                            <div>
-                              <div style={{fontSize:15, fontWeight:500}}>{t.label}</div>
-                              {t.lang && <div style={{fontSize:12, color:C.textSec, marginTop:2}}>{t.lang.toUpperCase()}</div>}
-                            </div>
-                          </div>
-                        ))
-                    }
+                    <div style={panelHeaderStyle}><button style={{background:'none',border:'none',color:'#fff',cursor:'pointer'}} onClick={() => setOpenPanel('settings')}><IconChevronLeft/></button> Audio</div>
+                    {audioTracks.length === 0 ? <p style={{color:C.textSec, fontSize:13, textAlign:'center', padding:'28px 20px'}}>No alternate audio tracks available</p> : audioTracks.map(t => (
+                      <div key={t.id} style={radioOptionStyle} onClick={() => switchAudio(t.id)}>
+                        <RadioCircle selected={t.id === activeAudio}/>
+                        <div><div style={{fontSize:15, fontWeight:500}}>{t.label}</div>{t.lang && <div style={{fontSize:12, color:C.textSec, marginTop:2}}>{t.lang.toUpperCase()}</div>}</div>
+                      </div>
+                    ))}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -771,14 +668,11 @@ export default function Player() {
                 {openPanel === 'subtitles' && (
                   <motion.div initial={{ opacity:0, y:-8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-8 }} style={panelStyle} onClick={e => e.stopPropagation()}>
                     <div style={panelHeaderStyle}><button style={{background:'none',border:'none',color:'#fff',cursor:'pointer'}} onClick={() => setOpenPanel('settings')}><IconChevronLeft/></button> Subtitles</div>
-                    {subTracks.length <= 1
-                      ? <p style={{color:C.textSec, fontSize:13, textAlign:'center', padding:'28px 20px'}}>No subtitles in this stream</p>
-                      : subTracks.map(s => (
-                          <div key={s.id} style={radioOptionStyle} onClick={() => switchSub(s.id)}>
-                            <RadioCircle selected={s.id === activeSub}/><div style={{fontSize:15, fontWeight:500}}>{s.label}</div>
-                          </div>
-                        ))
-                    }
+                    {subTracks.length <= 1 ? <p style={{color:C.textSec, fontSize:13, textAlign:'center', padding:'28px 20px'}}>No subtitles in this stream</p> : subTracks.map(s => (
+                      <div key={s.id} style={radioOptionStyle} onClick={() => switchSub(s.id)}>
+                        <RadioCircle selected={s.id === activeSub}/><div style={{fontSize:15, fontWeight:500}}>{s.label}</div>
+                      </div>
+                    ))}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -788,18 +682,12 @@ export default function Player() {
                 {openPanel === 'quality' && (
                   <motion.div initial={{ opacity:0, y:-8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-8 }} style={panelStyle} onClick={e => e.stopPropagation()}>
                     <div style={panelHeaderStyle}><button style={{background:'none',border:'none',color:'#fff',cursor:'pointer'}} onClick={() => setOpenPanel('settings')}><IconChevronLeft/></button> Video Quality</div>
-                    {qualities.length === 0
-                      ? <p style={{color:C.textSec, fontSize:13, textAlign:'center', padding:'28px 20px'}}>Quality options unavailable</p>
-                      : qualities.map(q => (
-                          <div key={q.id} style={radioOptionStyle} onClick={() => switchQuality(q.id)}>
-                            <RadioCircle selected={q.id === activeQuality}/>
-                            <div>
-                              <div style={{fontSize:15, fontWeight:500}}>{q.label}</div>
-                              {q.bitrate && <div style={{fontSize:12, color:C.textSec, marginTop:2}}>~{(q.bitrate / 1e6).toFixed(1)} Mbps</div>}
-                            </div>
-                          </div>
-                        ))
-                    }
+                    {qualities.length === 0 ? <p style={{color:C.textSec, fontSize:13, textAlign:'center', padding:'28px 20px'}}>Quality options unavailable</p> : qualities.map(q => (
+                      <div key={q.id} style={radioOptionStyle} onClick={() => switchQuality(q.id)}>
+                        <RadioCircle selected={q.id === activeQuality}/>
+                        <div><div style={{fontSize:15, fontWeight:500}}>{q.label}</div>{q.bitrate && <div style={{fontSize:12, color:C.textSec, marginTop:2}}>~{(q.bitrate / 1e6).toFixed(1)} Mbps</div>}</div>
+                      </div>
+                    ))}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -836,36 +724,23 @@ export default function Player() {
               <span style={{fontSize:13, color:'#fff', minWidth:45, letterSpacing:'0.02em'}}>{fmt(current)}</span>
               <div ref={seekTrackRef} onClick={e => { e.stopPropagation(); seekTo(e) }} style={{ flex:1, position:'relative', height:3, background:'rgba(255,255,255,0.3)', borderRadius:2, cursor:'pointer' }}>
                 <div style={{ position:'absolute', inset:'0 auto 0 0', width:`${pctBuffered}%`, background:'rgba(255,255,255,0.2)', borderRadius:2 }}/>
-                <div style={{ position:'absolute', inset:'0 auto 0 0', width:`${pctPlayed}%`, background:'#fff', borderRadius:2 }}>
+                <div style={{ position:'absolute', inset:'0 auto 0 0', width:`${pctPlayed}%`, background:'#fff', borderRadius:2, position:'relative' }}>
                   <div style={{ position:'absolute', right:-5, top:'50%', transform:'translateY(-50%)', width:10, height:10, background:'#fff', borderRadius:'50%', boxShadow:'0 0 4px rgba(0,0,0,0.5)' }}/>
                 </div>
               </div>
               <span style={{fontSize:13, color:'#fff', minWidth:45, textAlign:'right', letterSpacing:'0.02em'}}>{fmt(duration)}</span>
             </div>
+
             <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:20}}>
               <button style={ICON_BTN} onClick={e => { e.stopPropagation(); if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10); resetHide() }}><IconSkipBack/></button>
               <button onClick={e => { e.stopPropagation(); togglePlay() }} style={{ width:56, height:56, background:'rgba(255,255,255,0.95)', border:'none', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'#000' }}>
-                <AnimatePresence mode="wait">
-                  {playing
-                    ? <motion.div key="p"  initial={{scale:0}} animate={{scale:1}} exit={{scale:0}} transition={{duration:0.15}}><IconPause/></motion.div>
-                    : <motion.div key="pl" initial={{scale:0}} animate={{scale:1}} exit={{scale:0}} transition={{duration:0.15}}><IconPlay/></motion.div>
-                  }
-                </AnimatePresence>
+                <AnimatePresence mode="wait">{playing ? <motion.div key="p" initial={{scale:0}} animate={{scale:1}} exit={{scale:0}} transition={{duration:0.15}}><IconPause/></motion.div> : <motion.div key="pl" initial={{scale:0}} animate={{scale:1}} exit={{scale:0}} transition={{duration:0.15}}><IconPlay/></motion.div>}</AnimatePresence>
               </button>
               <button style={ICON_BTN} onClick={e => { e.stopPropagation(); if (videoRef.current) videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10); resetHide() }}><IconSkipFwd/></button>
             </div>
           </div>
         </motion.div>
       )}
-
-      {/* ── Buffering spinner ── */}
-      <AnimatePresence>
-        {isBuffering && loadState === 'playing' && (
-          <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} style={{ position:'absolute', inset:0, zIndex:15, display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none' }}>
-            <motion.div animate={{ rotate: 360 }} transition={{ duration:0.8, repeat:Infinity, ease:'linear' }} style={{ width:48, height:48, border:'3px solid rgba(255,255,255,0.1)', borderTopColor:'#fff', borderRadius:'50%' }}/>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   )
 }
