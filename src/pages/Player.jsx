@@ -222,9 +222,11 @@ export default function Player() {
     }))
 
     const ADDONS = [
-      { base: `https://webstreamr.hayd.uk/${webStreamrConfig}`, label: 'WebStreamr (All Languages)' },
+      { base: `https://webstreamr.hayd.uk/${webStreamrConfig}`, label: 'WebStreamr' },
       { base: 'https://nuviostreams.hayd.uk', label: 'Nuvio Streams' },
       { base: 'https://stremify.hayd.uk', label: 'Stremify' },
+      { base: 'https://mediafusion.elfhosted.com', label: 'MediaFusion (Web-DLs)' },
+      { base: 'https://autostream.elfhosted.com', label: 'AutoStream' },
     ]
 
     // Query ALL addons in parallel to aggregate maximum streams
@@ -328,11 +330,12 @@ export default function Player() {
       if (combined.includes('2160p') || combined.includes('4k')) score += 30
       if (combined.includes('480p') || combined.includes('360p')) score -= 50
 
-      // ── 6. Source quality indicators ──────────────────────────────────
-      if (combined.includes('bluray')) score += 60
-      if (combined.includes('web-dl') || combined.includes('webdl')) score += 50
-      if (combined.includes('amzn') || combined.includes('nf') || combined.includes('dsnp')) score += 40
-      if (combined.includes('remux')) score += 30
+      // ── 6. Source quality indicators (CRITICAL for OTT Dubs) ──────────
+      // AMZN WEB-DLs are the exact files that contain English + 5 Indian languages
+      if (combined.includes('amzn') || combined.includes('prime')) score += 400
+      if (combined.includes('web-dl') || combined.includes('webdl') || combined.includes('webrip')) score += 300
+      if (combined.includes('nf') || combined.includes('netflix') || combined.includes('dsnp')) score += 250
+      if (combined.includes('bluray') || combined.includes('remux')) score += 60
 
       // ── 7. Penalize isolated single-language foreign dubs ─────────────
       // Only penalize if stream has NO English/Hindi/Multi
