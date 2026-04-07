@@ -21,7 +21,6 @@
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.13.2",
     "react-youtube": "^10.1.0",
-    "torrent-stream": "^1.2.1",
     "vidstack": "^0.6.15"
   },
   "devDependencies": {

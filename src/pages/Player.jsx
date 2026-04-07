@@ -491,11 +491,6 @@ export default function Player() {
     for (const result of results) {
       if (result.status === 'fulfilled') {
         for (const stream of result.value) {
-          if (!stream.url && stream.infoHash) {
-             const magnet = `magnet:?xt=urn:btih:${stream.infoHash}`;
-             const trackers = '&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2F9.rarbg.com%3A2810%2Fannounce';
-             stream.url = `http://localhost:4000/stream?magnet=${encodeURIComponent(magnet + trackers)}`;
-          }
           if (stream.url && !seenUrls.has(stream.url)) {
             seenUrls.add(stream.url)
             allStreams.push(stream)
