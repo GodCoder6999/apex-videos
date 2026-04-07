@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { RefreshCw, AlertCircle } from 'lucide-react'
 import { MediaPlayer, MediaProvider, useMediaState, useAudioOptions, useVideoQualityOptions, useMediaRemote } from '@vidstack/react'
-import '@vidstack/react/player/styles/base.css'
 
 const BASE_URL = 'https://api.themoviedb.org/3'
 const API_KEY = import.meta.env.VITE_TMDB_API_KEY
@@ -197,27 +196,8 @@ function PlayerUI({ sources, activeSource, setActiveSource, fetchSources, title,
   }
 
   const stream = sources[activeSource]
-
-  const [resolvedHlsSrc, setResolvedHlsSrc] = useState(null)
-  useEffect(() => {
-    if (!stream?.url) return
-    if (stream.url.startsWith('dynamic-hls:')) {
-      const magnet = stream.url.replace('dynamic-hls:', '')
-      setResolvedHlsSrc(null)
-      fetch(`http://localhost:4000/hls-start?magnet=${encodeURIComponent(magnet)}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.url) setResolvedHlsSrc(data.url)
-        })
-        .catch(err => console.error('HLS Resolution Error:', err))
-    } else {
-      setResolvedHlsSrc(stream.url)
-    }
-  }, [stream])
-
-  const effectiveUrl = resolvedHlsSrc
-  const isM3U8 = effectiveUrl && (/\.m3u8/i.test(effectiveUrl) || effectiveUrl.includes('.m3u8'))
-  const proxyUrl = isM3U8 && !effectiveUrl.startsWith('http://localhost:4000') ? `/api/proxy?url=${encodeURIComponent(effectiveUrl)}` : effectiveUrl
+  const isM3U8 = stream?.url && (/\.m3u8/i.test(stream.url) || stream.url.includes('.m3u8'))
+  const proxyUrl = isM3U8 ? `/api/proxy?url=${encodeURIComponent(stream.url)}` : stream?.url
 
   const pctPlayed = duration ? (current / duration) * 100 : 0
   const pctBuffered = duration ? (buffered / duration) * 100 : 0
@@ -510,12 +490,6 @@ export default function Player() {
     for (const result of results) {
       if (result.status === 'fulfilled') {
         for (const stream of result.value) {
-          if (!stream.url && stream.infoHash) {
-             const magnet = `magnet:?xt=urn:btih:${stream.infoHash}`;
-             const trackers = '&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2F9.rarbg.com%3A2810%2Fannounce';
-             // Push the metadata but flag it as dynamic HTTP resolution
-             stream.url = `dynamic-hls:${magnet + trackers}`
-          }
           if (stream.url && !seenUrls.has(stream.url)) {
             seenUrls.add(stream.url)
             allStreams.push(stream)
