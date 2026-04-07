@@ -197,7 +197,9 @@ function PlayerUI({ sources, activeSource, setActiveSource, fetchSources, title,
 
   const stream = sources[activeSource]
   const isM3U8 = stream?.url && (/\.m3u8/i.test(stream.url) || stream.url.includes('.m3u8'))
-  const proxyUrl = isM3U8 ? `/api/proxy?url=${encodeURIComponent(stream.url)}` : stream?.url
+  const proxyUrl = isM3U8 ? `/api/proxy?url=${encodeURIComponent(stream.url)}&ext=.m3u8` : stream?.url
+
+  const videoSrc = proxyUrl ? (isM3U8 ? { src: proxyUrl, type: 'application/x-mpegurl' } : proxyUrl) : ''
 
   const pctPlayed = duration ? (current / duration) * 100 : 0
   const pctBuffered = duration ? (buffered / duration) * 100 : 0
@@ -235,7 +237,7 @@ function PlayerUI({ sources, activeSource, setActiveSource, fetchSources, title,
   const speedLabel = speed === 1 ? 'Normal' : `${speed}×`
 
   return (
-    <MediaPlayer ref={player} src={proxyUrl || ''} autoPlay playsInline crossOrigin="anonymous" style={{ width: '100%', height: '100%' }}>
+    <MediaPlayer ref={player} src={videoSrc || ''} autoPlay playsInline crossOrigin="anonymous" style={{ width: '100%', height: '100%' }}>
       <MediaProvider />
       <div ref={containerRef} onMouseMove={resetHide} onTouchStart={resetHide} onClick={() => { if (loadState === 'playing') { togglePlay(); resetHide() } }} style={{ position: 'absolute', inset: 0, zIndex: 100, display: 'flex', flexDirection: 'column', userSelect: 'none', fontFamily: "'Amazon Ember','Arial',sans-serif" }}>
 

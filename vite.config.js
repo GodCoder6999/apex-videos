@@ -18,7 +18,7 @@ const vercelProxyPlugin = () => ({
           return
         }
 
-        const decoded = decodeURIComponent(target)
+        const decoded = target // already decoded by searchParams.get
         const origin = decoded.match(/^(https?:\/\/[^/]+)/)?.[1] || 'https://vidsrc.me'
 
         // Fetch the target stream
