@@ -11,13 +11,18 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
+    "@vidstack/react": "^0.6.15",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "framer-motion": "^12.0.0",
     "lucide-react": "^1.7.0",
     "movie-trailer": "^3.2.2",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.13.2",
-    "react-youtube": "^10.1.0"
+    "react-youtube": "^10.1.0",
+    "torrent-stream": "^1.2.1",
+    "vidstack": "^0.6.15"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
